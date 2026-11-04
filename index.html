@@ -378,6 +378,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       h += '<section style="display:flex;flex-direction:column;gap:12px"><h2>' + (esHoy ? 'Clases de hoy' : 'Clases del ' + esc(fechaCorta(f))) + '</h2>' +
         clases.map(function (g) { return tarjetaGrupo(g, f, true); }).join('') + '</section>';
     }
+    if (!clases.length && abiertos().length) h += sinClases(f, esHoy);
     if (resto.length) {
       h += '<section style="display:flex;flex-direction:column;gap:12px"><h2>' + (clases.length ? 'Otros grupos' : 'Todos los grupos') + '</h2>' +
         resto.map(function (g) { return tarjetaGrupo(g, f, false); }).join('') + '</section>';
@@ -391,6 +392,22 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         }).join('') + '</section>';
     }
     return h + '</main>';
+  }
+
+  // Aviso de día sin clases, con la próxima clase (de cualquier grupo) en los 7 días siguientes
+  function sinClases(f, esHoy) {
+    var dia = NOMBRE_DIA[deIso(f).getDay()].toLowerCase();
+    var t = esHoy ? 'Hoy no hay clases.' : 'El ' + dia + ' ' + fechaCorta(f) + ' no hay clases.';
+    var prox = '';
+    for (var k = 1; k <= 7; k++) {
+      var d = sumarDias(f, k), gs = gruposDelDia(d);
+      if (gs.length) {
+        var cuando = (esHoy && k === 1 ? 'mañana ' : 'el ') + NOMBRE_DIA[deIso(d).getDay()].toLowerCase() + (esHoy && k === 1 ? '' : ' ' + fechaCorta(d));
+        prox = 'La próxima: ' + cuando + ', ' + gs[0].hora + ' · ' + gs[0].sede + '.';
+        break;
+      }
+    }
+    return '<section class="card"><b style="font-size:20px">' + esc(t) + '</b>' + (prox ? '<span class="sub" style="margin:0">' + esc(prox) + '</span>' : '') + '</section>';
   }
 
   // Clase siguiente (n=1) o anterior (n=-1) del grupo según sus días; null si no hay en 14 días
