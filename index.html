@@ -503,7 +503,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<p class="sub" style="margin:0;font-weight:700;color:var(--ink)">' + (f === hoy() ? 'Hoy, ' : '') + esc(fechaLarga(f)) + '</p>' +
       (sinProx && px && !futuro ? '<p class="sub chico" style="margin:0">Próxima clase: ' + esc(fechaLarga(px)) + '</p>' : '') +
       (futuro ? '<p class="franja">Esta clase todavía no llegó: la lista se pasa ese día.</p>' : (f !== hoy() ? '<p class="franja">Estás viendo una clase pasada, no la de hoy.</p>' : '')) +
-      '<div class="fila"><p class="sub">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + '</p><p class="sub ok" style="font-weight:700">' + n + (n === 1 ? ' presente' : ' presentes') + '</p></div>' + sync() + '</header><main><ul class="lista">';
+      '<div class="fila"><p class="sub">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + '</p><p class="sub ok" style="font-weight:700">' + n + (n === 1 ? ' presente' : ' presentes') + '</p></div>' + sync() + '</header><main>' +
+      // Arriba de la lista (pedido de Héctor): con grupos largos no hay que bajar hasta el final.
+      '<div class="dos"><button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="verAsist" data-g="' + esc(g.id) + '" data-mes="' + mes + '">Ver asistencias</button>' +
+      '<button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="grupoEditar" data-g="' + esc(g.id) + '">Editar grupo</button></div><ul class="lista">';
     if (!al.length) h += '<li class="vacio">Este grupo no tiene alumnos.</li>';
     al.forEach(function (a) {
       var on = !!pr[a.id], e = estadoPago(a, mes);
@@ -512,9 +515,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         (e.debe ? '<button class="chip debe cobrar" style="border:0;cursor:pointer;min-height:44px;padding:0 16px" data-a="cobrar" data-id="' + esc(a.id) + '" data-mes="' + mes + '">Cobrar ' + MESES[Number(mes.slice(5)) - 1] + '</button>' : '') +
         '<button class="tilde" data-a="toggle" data-id="' + esc(a.id) + '" aria-pressed="' + on + '"' + (futuro ? ' disabled style="opacity:.35;cursor:default"' : '') + ' aria-label="' + (on ? 'Quitar presente a ' : 'Marcar presente a ') + esc(a.nombre) + '">' + IC.tilde + '</button></li>';
     });
-    return h + '</ul><p class="sub chico">Cada toque se guarda solo. Si no hay señal, queda en el celular y se manda cuando vuelve.</p>' +
-      '<div class="dos"><button class="btn sec" data-a="verAsist" data-g="' + esc(g.id) + '" data-mes="' + mes + '">Ver asistencias</button>' +
-      '<button class="btn sec" data-a="grupoEditar" data-g="' + esc(g.id) + '">Editar grupo</button></div></main>';
+    return h + '</ul><p class="sub chico">Cada toque se guarda solo. Si no hay señal, queda en el celular y se manda cuando vuelve.</p></main>';
   }
 
   function vCobro() {
@@ -795,7 +796,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 6;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 7;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
@@ -823,7 +824,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         '<div style="display:flex;justify-content:flex-end;gap:8px"><span class="chip" style="padding:8px 14px">Editar</span><span class="chip" style="padding:8px 14px;background:var(--pista);color:var(--muted)">Borrar</span></div>' },
     { t: 'Alumnos y Panel', p: 'En Alumnos podés buscar a alguien, ver sus pagos, cambiarle la cuota, agregar alumnos nuevos o darlos de baja. En Panel ves cuánto cobraste en el mes y cómo va cada grupo.',
       demo: '<div class="btn">+ Nuevo alumno</div>' },
-    { v: 2, t: 'Ver quién vino a cada grupo', p: 'Entrá a un grupo y abajo de todo tocá "Ver asistencias" (también está en cada grupo del Panel). Ahí ves cuántas veces vino cada alumno en el mes y qué días, quién no vino, y quiénes ya no están en el grupo. Con las flechas ‹ › cambiás de mes.',
+    { v: 7, t: 'Ver quién vino a cada grupo', p: 'Entrá a un grupo y tocá "Ver asistencias": ahora está arriba, antes de la lista, al lado de "Editar grupo". También está en cada grupo del Panel. Ahí ves cuántas veces vino cada alumno en el mes y qué días, quién no vino, y quiénes ya no están en el grupo. Con las flechas ‹ › cambiás de mes.',
       demo: '<div class="btn sec" style="min-height:44px;font-size:16px">Ver asistencias</div>' +
         '<div class="alumno" style="padding-right:14px"><span class="nom"><b>Maria Pia</b><span class="estado ok">Vino a 3 de 4 clases</span><span class="muted chico">2/11 · 4/11 · 6/11</span></span></div>' +
         '<div class="alumno" style="padding-right:14px"><span class="nom"><b>Gustavo</b><span class="estado mal">No vino este mes</span></span></div>' },
