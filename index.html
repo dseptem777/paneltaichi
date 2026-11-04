@@ -129,6 +129,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function leerCfg() { try { return JSON.parse(localStorage.getItem(CLAVE_LS) || 'null'); } catch (e) { return null; } }
   function guardarCfg(c) { try { localStorage.setItem(CLAVE_LS, JSON.stringify(c)); } catch (e) {} }
   var cfg = leerCfg();
+  // Lo que se va escribiendo en Conectar: sobrevive a redibujar la pantalla y a que el celular recargue la página
+  // al cambiar de app (Héctor copiaba la dirección, iba a WhatsApp por la clave y al volver estaba todo vacío).
+  var BORR_LS = 'taichi_conectar_borrador';
+  function leerBorrConn() { try { return JSON.parse(localStorage.getItem(BORR_LS) || 'null'); } catch (e) { return null; } }
+  function guardarBorrConn(b) { try { if (b) localStorage.setItem(BORR_LS, JSON.stringify(b)); else localStorage.removeItem(BORR_LS); } catch (e) {} }
 
   // POST como text/plain: evita el preflight de CORS que Apps Script no responde.
   function llamar(accion, datos, c) {
@@ -409,6 +414,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // ---------- Pantallas ----------
   function vConectar() {
     // La clave guardada no se muestra: el campo vacío quiere decir "usar la que ya está".
+    if (!S.conn) S.conn = leerBorrConn();
     return '<header>' + (cfg && D ? '<button class="volver" data-a="ir" data-v="panel">‹ Volver sin cambiar nada</button>' : '') +
       '<h1>Conectar</h1><p class="sub">Esto se hace una sola vez en cada celular.</p></header><main>' +
       (S.claveMal ? '<p class="franja">La clave que tiene guardada este celular ya no anda. Escribí la nueva y tocá Conectar.' + (cola.length ? ' Lo guardado en el celular no se pierde.' : '') + '</p>' : '') +
@@ -990,6 +996,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     tutoCerrar: function () { S.tuto = null; S.tutoNovedad = false; marcarTutoVisto(); render(); },
     ir: function (d) {
       if (d.v === 'conectar') { S.error = null; S.conn = null; }
+      else if (S.vista === 'conectar') { S.conn = null; guardarBorrConn(null); } // "Volver sin cambiar nada"
       // La barra de abajo vuelve siempre a hoy (Grupos) y al mes actual (Cobros).
       if (d.barra && d.v === 'hoy') S.fecha = hoy();
       if (d.barra && d.v === 'cobro') S.mesCobro = mesDe(hoy());
@@ -1149,7 +1156,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       // Lo que está en la cola se manda recién con la conexión nueva ya guardada (no se pierde).
       llamar('todo', { mes: mes }, c).then(function (d) {
         cfg = c; guardarCfg(c); D = d; mesCargado = mes; S.ultima = new Date(); S.fecha = hoy(); S.vista = 'hoy';
-        S.claveMal = false; S.conn = null; S.sinSenal = false; S.errorCola = null;
+        S.claveMal = false; S.conn = null; guardarBorrConn(null); S.sinSenal = false; S.errorCola = null;
         aplicarCola(); guardarCache(); cargar();
       }).catch(function (e) { S.error = sinSenalReal(e) ? 'Sin señal: para conectar hace falta conexión.' : e.message; }).then(function () { S.cargando = false; render(); });
     }
@@ -1165,6 +1172,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function destino() { return S.vista === 'cobro' ? S.pago : (S.vista === 'grupoEdit' ? S.gedit : S.edit); }
   // Campos de formularios: se guardan en el borrador sin redibujar (así no se pierde el teclado).
   document.addEventListener('input', function (e) {
+    var t = e.target.id;
+    if (t === 'c-url' || t === 'c-token') {
+      S.conn = { url: document.getElementById('c-url').value, tokenEscrito: document.getElementById('c-token').value };
+      guardarBorrConn(S.conn); return;
+    }
     var c = e.target.dataset && e.target.dataset.campo; if (!c) return;
     var v = e.target.value;
     if (c === 'buscar') { S.buscar = v; render(); return; }
