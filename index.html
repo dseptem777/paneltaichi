@@ -571,7 +571,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<button class="btn" data-a="nuevo">+ Nuevo alumno</button>' +
       '<div class="campo"><label for="b-al">Buscar</label><input id="b-al" type="search" data-campo="buscar" value="' + esc(S.buscar) + '" placeholder="Nombre"></div>' +
       // Filtro por grupo: una fila por lugar con sus horarios, así entra sin scroll aunque la letra sea grande.
-      '<div style="display:flex;flex-direction:column;gap:8px"><div class="filtros"><button data-a="filtro" data-g="" aria-pressed="' + (!S.filtroGrupo) + '">Todos</button></div>' +
+      // Activos / De baja arriba, como un filtro más (antes era un botón al final de la lista: pedido de Héctor, 4/11).
+      '<div style="display:flex;flex-direction:column;gap:8px"><div class="filtros"><button data-a="bajas" data-b="0" aria-pressed="' + (!S.verBajas) + '">Activos</button>' +
+      '<button data-a="bajas" data-b="1" aria-pressed="' + S.verBajas + '">De baja</button></div>' +
+      '<div class="filtros"><button data-a="filtro" data-g="" aria-pressed="' + (!S.filtroGrupo) + '">Todos los grupos</button></div>' +
       (function () {
         var porSede = {}, orden = [];
         abiertos().sort(porHora).forEach(function (g) { if (!porSede[g.sede]) { porSede[g.sede] = []; orden.push(g.sede); } porSede[g.sede].push(g); });
@@ -588,7 +591,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       h += '<li class="alumno"><button class="nom" data-a="ficha" data-id="' + esc(a.id) + '"><b>' + esc(a.nombre) + '</b><span class="chico muted">' + esc(g ? g.nombre : '') + '</span>' +
         (a.activo ? '<span class="estado ' + e.cls + '">' + esc(e.txt) + '</span>' : '') + '</button></li>';
     });
-    return h + '</ul><button class="btn sec" data-a="bajas">' + (S.verBajas ? 'Ver activos' : 'Ver dados de baja') + '</button></main>';
+    return h + '</ul></main>';
   }
 
   function vFicha() {
@@ -602,6 +605,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<span style="display:flex;flex-direction:column;gap:4px"><h1 style="font-size:26px">' + esc(a.nombre) + '</h1>' +
       (a.desde ? '<span class="chip" style="align-self:flex-start">Desde ' + esc(a.desde) + '</span>' : '') +
       (!a.activo ? '<span class="chip debe" style="align-self:flex-start">Dado de baja</span>' : '') + '</span></div></header><main>' +
+      // Botones arriba (pedido de Héctor, 4/11): con muchos pagos había que bajar hasta el final.
+      '<div class="dos"><button class="btn" data-a="cobrar" data-id="' + esc(a.id) + '">Registrar pago</button>' +
+      (tel ? '<a class="btn sec" href="https://wa.me/' + esc(tel) + '" target="_blank" rel="noopener">WhatsApp</a>' : '<button class="btn sec" data-a="editar">Editar</button>') + '</div>' +
+      (tel ? '<button class="btn sec" data-a="editar">Editar datos</button>' : '') +
       '<section class="card"><h2 class="sub" style="font-weight:600">Cuota</h2>' +
       '<div class="fila"><span>Grupo</span><b style="font-weight:600">' + esc(g ? g.nombre : '—') + '</b></div>' +
       '<div class="fila" style="font-size:18px;font-weight:700"><span>Paga por mes</span><span>' + (a.cuota ? plata(a.cuota) : '—') + '</span></div></section>' +
@@ -621,10 +628,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
             '<button class="chip" style="border:0;cursor:pointer;min-height:44px;padding:0 14px" data-a="editarPago" data-id="' + esc(p.id) + '" aria-label="Editar pago de ' + esc(nombreMes(p.mes)) + '">Editar</button>' +
             '<button class="chip" style="border:0;cursor:pointer;min-height:44px;min-width:96px;padding:0 14px;background:var(--pista);color:var(--muted)" data-a="borrarPago" data-id="' + esc(p.id) + '" aria-label="Borrar pago de ' + esc(nombreMes(p.mes)) + '">Borrar</button></div>');
     });
-    h += '</section>' + (a.notas ? '<section class="card"><h2 class="sub" style="font-weight:600">Notas</h2><p style="margin:0;white-space:pre-line">' + esc(a.notas) + '</p></section>' : '') +
-      '<div class="dos"><button class="btn" data-a="cobrar" data-id="' + esc(a.id) + '">Registrar pago</button>' +
-      (tel ? '<a class="btn sec" href="https://wa.me/' + esc(tel) + '" target="_blank" rel="noopener">WhatsApp</a>' : '<button class="btn sec" data-a="editar">Editar</button>') + '</div>' +
-      (tel ? '<button class="btn sec" data-a="editar">Editar datos</button>' : '') + '</main>';
+    h += '</section>' + (a.notas ? '<section class="card"><h2 class="sub" style="font-weight:600">Notas</h2><p style="margin:0;white-space:pre-line">' + esc(a.notas) + '</p></section>' : '') + '</main>';
     return h;
   }
 
@@ -796,7 +800,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 7;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 8;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
@@ -822,8 +826,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     { v: 6, t: 'Corregir un cobro', p: 'Si te equivocaste en un cobro, andá a la ficha del alumno (tocá su nombre). En "Pagos" tocá "Editar" para cambiar el monto, la forma de pago o el mes. Si el pago no corresponde, tocá "Borrar": te pregunta si estás seguro, y para borrarlo tocás "Sí, borrar" (a la izquierda).',
       demo: '<div class="fila"><span>Noviembre 2026<br><span class="muted chico">2/11 · efectivo</span></span><b class="ok">$55.000</b></div>' +
         '<div style="display:flex;justify-content:flex-end;gap:8px"><span class="chip" style="padding:8px 14px">Editar</span><span class="chip" style="padding:8px 14px;background:var(--pista);color:var(--muted)">Borrar</span></div>' },
-    { t: 'Alumnos y Panel', p: 'En Alumnos podés buscar a alguien, ver sus pagos, cambiarle la cuota, agregar alumnos nuevos o darlos de baja. En Panel ves cuánto cobraste en el mes y cómo va cada grupo.',
-      demo: '<div class="btn">+ Nuevo alumno</div>' },
+    { v: 8, t: 'Alumnos y Panel', p: 'En Alumnos podés buscar a alguien, ver sus pagos, cambiarle la cuota, agregar alumnos nuevos o darlos de baja. Para ver a los que se fueron, tocá "De baja" arriba de la lista. En la ficha de cada alumno, "Registrar pago" y "WhatsApp" están arriba de todo. En Panel ves cuánto cobraste en el mes y cómo va cada grupo.',
+      demo: '<div class="filtros"><span class="chip fuerte" style="padding:8px 14px">Activos</span><span class="chip" style="padding:8px 14px">De baja</span></div>' },
     { v: 7, t: 'Ver quién vino a cada grupo', p: 'Entrá a un grupo y tocá "Ver asistencias": ahora está arriba, antes de la lista, al lado de "Editar grupo". También está en cada grupo del Panel. Ahí ves cuántas veces vino cada alumno en el mes y qué días, quién no vino, y quiénes ya no están en el grupo. Con las flechas ‹ › cambiás de mes.',
       demo: '<div class="btn sec" style="min-height:44px;font-size:16px">Ver asistencias</div>' +
         '<div class="alumno" style="padding-right:14px"><span class="nom"><b>Maria Pia</b><span class="estado ok">Vino a 3 de 4 clases</span><span class="muted chico">2/11 · 4/11 · 6/11</span></span></div>' +
@@ -1115,7 +1119,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       encolar('presente', datos);
     },
     filtro: function (d) { S.filtroGrupo = d.g; render(); },
-    bajas: function () { S.verBajas = !S.verBajas; render(); },
+    bajas: function (d) { S.verBajas = d.b === '1'; render(); },
     nuevo: function () {
       // Sin grupo elegido de antemano: si no se mira el selector, no queda en un grupo cualquiera.
       S.edit = { id: '', idNuevo: id(), nombre: '', grupo: S.filtroGrupo || '', cuota: 0, telefono: '', desde: '', notas: '', activo: true };
