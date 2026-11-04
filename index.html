@@ -100,7 +100,20 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 .logo.grande { width: 120px; height: 120px; }
 #toast { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); background: var(--verde-oscuro); color: #fff; padding: 12px 18px; border-radius: 12px; font-weight: 600; font-size: 15px; display: none; max-width: 90vw; text-align: center; z-index: 5; }
 #toast.mal { background: var(--debe); }
-.estado-sync { font-size: 13px; color: var(--muted); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.estado-sync { font-size: 14px; color: var(--muted); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; min-height: 44px; display: flex; align-items: center; }
+/* Avisos que se quedan hasta que Héctor los ve (un cobro que la planilla no aceptó, una clase que no es de hoy). */
+.franja { background: var(--debe-bg); color: #7A3A08; border-radius: 12px; padding: 10px 14px; font-size: 15px; font-weight: 600; margin: 0; }
+.rechazo { display: flex; flex-direction: column; gap: 8px; background: var(--debe-bg); color: #7A3A08; border-radius: 16px; padding: 12px 14px; font-size: 15px; font-weight: 600; }
+.rechazo .btn { min-height: 44px; font-size: 15px; }
+/* Dos botones que con letra grande bajan de renglón en vez de cortarse. */
+.medios { display: flex; flex-wrap: wrap; gap: 8px; }
+.medios .opcion { flex: 1 1 8em; }
+.dias7 { display: flex; flex-wrap: wrap; gap: 6px; }
+.dias7 .opcion { flex: 1 0 44px; padding: 0; }
+.btn.peligro { background: var(--card); border-color: var(--debe); color: var(--debe); }
+.pregunta { display: flex; flex-direction: column; gap: 10px; background: var(--card); border: 2px solid var(--pastel-borde); border-radius: 16px; padding: 14px; }
+.pregunta .opcion { text-align: left; padding: 10px 14px; line-height: 1.3; }
+.pregunta .opcion small { display: block; font-size: 14px; font-weight: 500; color: var(--muted); }
 .estado-sync.mal { color: var(--debe); font-weight: 600; }
 </style>
 </head>
@@ -123,11 +136,25 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var cuerpo = Object.assign({ accion: accion, token: c.token }, datos || {});
     // red = true: no se llegó a la planilla (sin señal, wifi con portal, etc.). Se puede reintentar.
     function deRed(m) { var e = new Error(m); e.red = true; return e; }
+    // raro = sí hubo señal pero no contestó la planilla (falla de Google, permisos, URL vieja). También se reintenta.
+    function raro(m) { var e = new Error(m); e.raro = true; return e; }
     return fetch(c.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(cuerpo) })
       .catch(function () { throw deRed('Sin conexión'); })
-      .then(function (r) { return r.json().catch(function () { throw deRed('La API respondió algo raro. ¿La URL es la /exec?'); }); })
-      .then(function (j) { if (!j.ok) throw new Error(j.error || 'Error desconocido'); return j.data; });
+      .then(function (r) { return r.json().catch(function () { throw raro('La planilla no respondió bien. ¿La dirección es la /exec?'); }); })
+      .then(function (j) {
+        if (!j.ok) { var e = new Error(j.error || 'Error desconocido'); e.tipo = j.tipo || tipoViejo(j.error); throw e; }
+        return j.data;
+      });
   }
+  // Por si el Apps Script todavía es el de antes (no manda tipo).
+  function tipoViejo(m) {
+    m = String(m || '');
+    if (m === 'Clave incorrecta') return 'clave';
+    if (/lock|timeout|too many|service|servicio|exceeded|tiempo|internal/i.test(m)) return 'temporal';
+    return 'datos';
+  }
+  // Errores que no son culpa del pedido: lo que estaba en la cola sigue ahí y se vuelve a mandar.
+  function sinSenalReal(e) { return e.red && !e.raro; }
 
   // ---------- Fechas y formatos ----------
   var DIAS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
@@ -154,10 +181,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   var mesCargado = null; // mes de las asistencias que hay en D
   var S = {
     vista: cfg ? 'hoy' : 'conectar',
-    fecha: hoy(), grupo: null, alumno: null, mesPanel: mesDe(hoy()),
+    fecha: hoy(), grupo: null, alumno: null, mesPanel: mesDe(hoy()), mesCobro: mesDe(hoy()),
     buscar: '', filtroGrupo: '', verBajas: false,
     pago: null, edit: null, borrarId: null,
-    cargando: false, error: null, ultima: null, sinSenal: false,
+    cargando: false, error: null, ultima: null, sinSenal: false, claveMal: false, errorCola: null,
     volver: 'hoy'
   };
 
@@ -167,11 +194,16 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Presentes y cobros nuevos van primero a una cola guardada en el celular y se mandan
   // en orden cuando hay señal. Los últimos datos descargados también quedan guardados,
   // así la app abre aunque no haya señal. Editar/borrar pagos y alumnos necesitan señal.
-  var COLA_LS = 'taichi_cola', CACHE_LS = 'taichi_datos';
+  var COLA_LS = 'taichi_cola', CACHE_LS = 'taichi_datos', RECH_LS = 'taichi_rechazados';
   function leerLS(k, def) { try { return JSON.parse(localStorage.getItem(k) || 'null') || def; } catch (e) { return def; } }
   function escribirLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   var cola = leerLS(COLA_LS, []);
   function guardarCola() { escribirLS(COLA_LS, cola); }
+  // Lo que la planilla no aceptó (dato inválido): no se tira en silencio, queda a la vista hasta que Héctor toca "Entendido".
+  var rechazos = leerLS(RECH_LS, []);
+  function guardarRechazos() { escribirLS(RECH_LS, rechazos); }
+  // Cuenta lo que llegó a la planilla. Si cambia mientras baja un "todo", lo que bajó ya es viejo.
+  var cambios = 0;
   function guardarCache() { if (D && S.ultima) escribirLS(CACHE_LS, { D: D, mes: mesCargado, t: S.ultima.getTime() }); }
   function claveP(d) { return d.fecha + '|' + d.grupo + '|' + d.alumno; }
 
@@ -183,7 +215,9 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function aplicarCola() {
     cola.forEach(function (it) {
       if (it.accion === 'presente') aplicarPresente(it.datos, it.datos.on);
-      if (it.accion === 'pagar' && !D.pagos.some(function (p) { return p.id === it.datos.p.id; })) D.pagos.push(it.datos.p);
+      if (it.accion === 'pagar' && !D.pagos.some(function (p) { return p.id === it.datos.p.id; })) D.pagos.push(Object.assign({}, it.datos.p));
+      if (it.accion === 'editarPago') { var x = D.pagos.find(function (p) { return p.id === it.datos.p.id; }); if (x) Object.assign(x, it.datos.p); }
+      if (it.accion === 'borrarPago') D.pagos = D.pagos.filter(function (p) { return p.id !== it.datos.id; });
     });
   }
   function encolar(accion, datos) {
@@ -197,31 +231,43 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     return vaciarCola();
   }
   function falloCola(it, e) {
+    var txt;
     if (it.accion === 'pagar') {
-      D.pagos = D.pagos.filter(function (p) { return p.id !== it.datos.p.id; });
-      var a = alumno(it.datos.p.alumno);
-      toast('No se guardó el pago de ' + (a ? a.nombre : '') + ': ' + e.message, true);
+      var p = it.datos.p, a = alumno(p.alumno);
+      D.pagos = D.pagos.filter(function (x) { return x.id !== p.id; });
+      txt = 'No se guardó el pago de ' + (a ? a.nombre : '') + ' (' + plata(p.monto) + ', ' + MESES[Number(p.mes.slice(5)) - 1] + ', ' + p.medio + ')';
     } else if (it.accion === 'presente') {
       aplicarPresente(it.datos, !it.datos.on);
       var b = alumno(it.datos.alumno);
-      toast('No se guardó el presente de ' + (b ? b.nombre : '') + ': ' + e.message, true);
-    }
+      txt = 'No se guardó el presente de ' + (b ? b.nombre : '') + ' del ' + fechaCorta(it.datos.fecha);
+    } else if (it.accion === 'editarPago') {
+      var c = alumno(it.datos.p.alumno);
+      txt = 'No se guardó la corrección del pago de ' + (c ? c.nombre : '') + ' (' + plata(it.datos.p.monto) + ')';
+    } else if (it.accion === 'borrarPago') {
+      txt = 'No se pudo borrar un pago';
+    } else txt = 'No se guardó un cambio';
+    rechazos.push({ txt: txt + '. La planilla dijo: ' + e.message + '.', t: Date.now() });
+    guardarRechazos();
   }
   var enviando = null;
   function vaciarCola() {
     if (enviando) return enviando;
     function paso() {
-      if (!cola.length || !cfg) return Promise.resolve();
+      if (!cola.length || !cfg || S.claveMal) return Promise.resolve();
       var it = cola[0];
       return llamar(it.accion, it.datos).then(function () {
         if (cola[0] === it) cola.shift();
-        guardarCola(); S.sinSenal = false;
+        cambios++; guardarCola(); S.sinSenal = false; S.errorCola = null; guardarCache();
         return paso();
       }, function (e) {
-        if (e.red) { S.sinSenal = true; return; }
-        // La planilla lo rechazó: no tiene sentido reintentar.
+        // Sin señal, o la planilla no pudo (bloqueo, límite de Google): queda en la cola y se reintenta.
+        if (sinSenalReal(e)) { S.sinSenal = true; return; }
+        if (e.raro || e.tipo === 'temporal') { S.sinSenal = false; S.errorCola = e.message; return; }
+        // Clave cambiada: se frena todo sin borrar nada, hasta que se vuelva a conectar.
+        if (e.tipo === 'clave') { S.claveMal = true; return; }
+        // Dato inválido: la planilla no lo va a aceptar nunca. Sale de la cola, pero queda el aviso.
         if (cola[0] === it) cola.shift();
-        guardarCola(); falloCola(it, e);
+        guardarCola(); falloCola(it, e); guardarCache();
         return paso();
       });
     }
@@ -232,15 +278,20 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function cargar(mes) {
     mes = mes || mesActivo();
     S.cargando = true;
+    var antes, viejo = false;
     // Primero se manda lo pendiente, así lo que baja ya lo incluye.
-    return vaciarCola().then(function () { return llamar('todo', { mes: mes }); }).then(function (d) {
+    return vaciarCola().then(function () { antes = cambios; return llamar('todo', { mes: mes }); }).then(function (d) {
+      // Si mientras bajaba llegó algo nuevo a la planilla (un cobro, un presente), esto ya es viejo: se pide de nuevo.
+      if (cambios !== antes) { viejo = true; return; }
       D = d; mesCargado = mes; S.ultima = new Date(); S.error = null; S.sinSenal = false;
       aplicarCola(); guardarCache();
     }).catch(function (e) {
       S.error = e.message;
-      if (e.red) S.sinSenal = true;
+      if (sinSenalReal(e)) S.sinSenal = true;
+      if (e.tipo === 'clave') S.claveMal = true;
     }).then(function () {
       S.cargando = false; render();
+      if (viejo) return cargar(mes);
       // Si mientras cargaba se cambió de mes, traer el que se está mirando ahora.
       if (!S.error && mesActivo() !== mesCargado) cargar();
     });
@@ -330,15 +381,25 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var tabs = [['hoy', 'Grupos'], ['alumnos', 'Alumnos'], ['cobro', 'Cobros'], ['panel', 'Panel']];
     var actual = { lista: 'hoy', ficha: 'alumnos', editar: 'alumnos', grupos: 'hoy', grupoEdit: 'hoy', grupoCerrar: 'hoy', asist: (S.volverAsist === 'lista' ? 'hoy' : 'panel') }[S.vista] || S.vista;
     return '<nav class="barra" aria-label="Secciones"><div>' + tabs.map(function (t) {
-      return '<button data-a="ir" data-v="' + t[0] + '"' + (actual === t[0] ? ' aria-current="page"' : '') + '>' + IC[t[0] === 'cobro' ? 'cobros' : t[0]] + t[1] + '</button>';
+      return '<button data-a="ir" data-barra="1" data-v="' + t[0] + '"' + (actual === t[0] ? ' aria-current="page"' : '') + '>' + IC[t[0] === 'cobro' ? 'cobros' : t[0]] + t[1] + '</button>';
     }).join('') + '</div></nav>';
   }
 
   function sync() {
+    return verRechazos() + estado();
+  }
+  function verRechazos() {
+    return rechazos.map(function (r, k) {
+      return '<div class="rechazo" role="alert"><span>' + esc(r.txt) + ' Fijate si hay que cargarlo de nuevo.</span><button class="btn sec" data-a="rechazoVisto" data-i="' + k + '">Entendido</button></div>';
+    }).join('');
+  }
+  function estado() {
     if (S.cargando && !D) return '<p class="sub">Cargando…</p>';
-    var n = cola.length;
-    if (n) return '<button class="estado-sync mal" data-a="recargar">' + (S.sinSenal ? 'Sin señal. ' : 'Enviando… ') + n + (n === 1 ? ' cambio guardado' : ' cambios guardados') +
-      ' en el celular' + (S.sinSenal ? ': se mandan solos cuando vuelva la señal.' : '.') + '</button>';
+    var n = cola.length, cuantos = n + (n === 1 ? ' cambio guardado' : ' cambios guardados') + ' en el celular';
+    if (S.claveMal) return '<button class="estado-sync mal" data-a="ir" data-v="conectar">La clave no anda' + (n ? ': hay ' + cuantos + ', esperando' : '') + '. Tocá acá para volver a conectar.</button>';
+    if (n && S.errorCola && !S.sinSenal) return '<button class="estado-sync mal" data-a="recargar">' + cuantos + '. La planilla no respondió (' + esc(S.errorCola) + '): se vuelve a probar sola.</button>';
+    if (n) return '<button class="estado-sync mal" data-a="recargar">' + (S.sinSenal ? 'Sin señal. ' : 'Enviando… ') + cuantos +
+      (S.sinSenal ? ': se mandan solos cuando vuelva la señal.' : '.') + '</button>';
     if (S.error && S.sinSenal && S.ultima) return '<button class="estado-sync mal" data-a="recargar">Sin señal. Datos de las ' + p2(S.ultima.getHours()) + ':' + p2(S.ultima.getMinutes()) + '. Tocá para reintentar.</button>';
     if (S.error) return '<button class="estado-sync mal" data-a="recargar">No se pudo actualizar (' + esc(S.error) + '). Tocá para reintentar.</button>';
     if (S.ultima) return '<button class="estado-sync" data-a="recargar">Actualizado ' + p2(S.ultima.getHours()) + ':' + p2(S.ultima.getMinutes()) + '</button>';
@@ -347,9 +408,13 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   // ---------- Pantallas ----------
   function vConectar() {
-    return '<header><h1>Conectar</h1><p class="sub">Esto se hace una sola vez en cada celular.</p></header><main>' +
+    // La clave guardada no se muestra: el campo vacío quiere decir "usar la que ya está".
+    return '<header>' + (cfg && D ? '<button class="volver" data-a="ir" data-v="panel">‹ Volver sin cambiar nada</button>' : '') +
+      '<h1>Conectar</h1><p class="sub">Esto se hace una sola vez en cada celular.</p></header><main>' +
+      (S.claveMal ? '<p class="franja">La clave que tiene guardada este celular ya no anda. Escribí la nueva y tocá Conectar.' + (cola.length ? ' Lo guardado en el celular no se pierde.' : '') + '</p>' : '') +
       '<div class="campo"><label for="c-url">Dirección de la planilla (termina en /exec)</label><input id="c-url" type="text" autocomplete="off" value="' + esc(S.conn ? S.conn.url : (cfg && cfg.url || '')) + '"></div>' +
-      '<div class="campo"><label for="c-token">Clave</label><input id="c-token" type="text" autocomplete="off" value="' + esc(S.conn ? S.conn.token : (cfg && cfg.token || '')) + '"></div>' +
+      '<div class="campo"><label for="c-token">Clave</label><input id="c-token" type="password" autocomplete="off" value="' + esc(S.conn ? S.conn.tokenEscrito : '') + '"' +
+      (cfg && !S.claveMal ? ' placeholder="Vacía: usa la que ya está guardada"' : '') + '></div>' +
       (S.error ? '<p class="err">' + esc(S.error) + '</p>' : '') +
       '<button class="btn" data-a="conectar"' + (S.cargando ? ' disabled' : '') + '>' + (S.cargando ? 'Probando…' : 'Conectar') + '</button></main>';
   }
@@ -424,20 +489,22 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var g = grupo(S.grupo); if (!g) { S.vista = 'hoy'; return vHoy(); }
     var f = S.fecha, mes = mesDe(f), al = alumnosDe(g.id), pr = presentesSet(f, g.id);
     var n = al.filter(function (a) { return pr[a.id]; }).length;
-    var px = otraClase(g, f, 1), sinProx = !px || px > hoy();
+    var px = otraClase(g, f, 1), sinProx = !px || px > hoy(), futuro = f > hoy();
     var h = '<header><button class="volver" data-a="ir" data-v="hoy">‹ Grupos</button>' +
       '<h1>' + esc(g.hora) + ' · ' + esc(g.sede) + '</h1>' +
       '<div class="fila" style="gap:8px"><button class="btn sec" style="min-height:44px;flex:1;font-size:15px;padding:0 8px" data-a="claseOtra" data-n="-1">‹ Anterior</button>' +
       '<button class="btn sec" style="min-height:44px;flex:1;font-size:15px;padding:0 8px" data-a="claseOtra" data-n="1"' + (sinProx ? ' disabled' : '') + '>Próxima ›</button></div>' +
       '<p class="sub" style="margin:0;font-weight:700;color:var(--ink)">' + (f === hoy() ? 'Hoy, ' : '') + esc(fechaLarga(f)) + '</p>' +
-      (sinProx && px ? '<p class="sub chico" style="margin:0">Próxima clase: ' + esc(fechaLarga(px)) + '</p>' : '') +
-      '<div class="fila"><p class="sub">' + al.length + ' alumnos</p><p class="sub ok" style="font-weight:700">' + n + ' presentes</p></div>' + sync() + '</header><main><ul class="lista">';
+      (sinProx && px && !futuro ? '<p class="sub chico" style="margin:0">Próxima clase: ' + esc(fechaLarga(px)) + '</p>' : '') +
+      (futuro ? '<p class="franja">Esta clase todavía no llegó: la lista se pasa ese día.</p>' : (f !== hoy() ? '<p class="franja">Estás viendo una clase pasada, no la de hoy.</p>' : '')) +
+      '<div class="fila"><p class="sub">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + '</p><p class="sub ok" style="font-weight:700">' + n + (n === 1 ? ' presente' : ' presentes') + '</p></div>' + sync() + '</header><main><ul class="lista">';
     if (!al.length) h += '<li class="vacio">Este grupo no tiene alumnos.</li>';
     al.forEach(function (a) {
       var on = !!pr[a.id], e = estadoPago(a, mes);
       h += '<li class="alumno conTilde"><button class="nom" data-a="ficha" data-id="' + esc(a.id) + '"><b>' + esc(a.nombre) + '</b><span class="estado ' + e.cls + '">' + esc(e.txt) + '</span></button>' +
-        (e.debe ? '<button class="chip debe cobrar" style="border:0;cursor:pointer;min-height:36px" data-a="cobrar" data-id="' + esc(a.id) + '">Cobrar</button>' : '') +
-        '<button class="tilde" data-a="toggle" data-id="' + esc(a.id) + '" aria-pressed="' + on + '" aria-label="' + (on ? 'Quitar presente a ' : 'Marcar presente a ') + esc(a.nombre) + '">' + IC.tilde + '</button></li>';
+        // Cobra el mes de la clase que se está mirando (si es una clase de octubre, cobra octubre).
+        (e.debe ? '<button class="chip debe cobrar" style="border:0;cursor:pointer;min-height:44px;padding:0 16px" data-a="cobrar" data-id="' + esc(a.id) + '" data-mes="' + mes + '">Cobrar ' + MESES[Number(mes.slice(5)) - 1] + '</button>' : '') +
+        '<button class="tilde" data-a="toggle" data-id="' + esc(a.id) + '" aria-pressed="' + on + '"' + (futuro ? ' disabled style="opacity:.35;cursor:default"' : '') + ' aria-label="' + (on ? 'Quitar presente a ' : 'Marcar presente a ') + esc(a.nombre) + '">' + IC.tilde + '</button></li>';
     });
     return h + '</ul><p class="sub chico">Cada toque se guarda solo. Si no hay señal, queda en el celular y se manda cuando vuelve.</p>' +
       '<div class="dos"><button class="btn sec" data-a="verAsist" data-g="' + esc(g.id) + '" data-mes="' + mes + '">Ver asistencias</button>' +
@@ -451,12 +518,15 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     if (meses.indexOf(P.mes) < 0) meses.push(P.mes);
     // Al editar, lo "ya pagado" no incluye este mismo pago.
     var ya = pagado(a.id, P.mes) - (P.editando && P.mesOriginal === P.mes ? P.montoOriginal : 0);
+    var cuotaMes = valoresEn(a, P.mes).cuota, completo = !P.editando && cuotaMes > 0 && ya >= cuotaMes;
     var h = '<header><button class="volver" data-a="cancelarPago">‹ Volver</button><h1>' + (P.editando ? 'Editar pago' : 'Registrar pago') + '</h1></header><main>' +
       '<div class="card" style="flex-direction:row;align-items:center;gap:12px"><span style="width:44px;height:44px;border-radius:22px;background:var(--pastel-suave);display:flex;align-items:center;justify-content:center;font-weight:700">' + esc(iniciales(a.nombre)) + '</span>' +
       '<span style="display:flex;flex-direction:column;gap:2px"><b style="font-size:18px;font-weight:600">' + esc(a.nombre) + '</b><span class="muted chico">' + esc(g ? g.nombre : '') + ' · cuota ' + plata(a.cuota) + '</span></span></div>' +
-      (ya ? '<p class="sub">Ya pagó ' + plata(ya) + ' de ' + esc(nombreMes(P.mes).toLowerCase()) + '.</p>' : '') +
+      (P.aviso ? '<p class="franja">' + esc(P.aviso) + '</p>' : '') +
+      (completo ? '<p class="franja">Ya pagó ' + esc(MESES[Number(P.mes.slice(5)) - 1]) + ' completo (' + plata(ya) + '). ¿Seguro que es ese mes?</p>' :
+        (ya ? '<p class="sub">Ya pagó ' + plata(ya) + ' de ' + esc(nombreMes(P.mes).toLowerCase()) + '.</p>' : '')) +
       '<div class="campo"><label for="p-monto">Monto que pagó</label><input id="p-monto" class="monto" type="text" inputmode="numeric" data-campo="monto" value="' + esc(P.monto ? plata(P.monto) : '') + '"></div>' +
-      '<div class="campo"><span style="font-size:15px;font-weight:600">Cómo pagó</span><div class="dos">' +
+      '<div class="campo"><span style="font-size:15px;font-weight:600">Cómo pagó</span><div class="medios">' +
       '<button class="opcion" data-a="medio" data-m="efectivo" aria-pressed="' + (P.medio === 'efectivo') + '">Efectivo</button>' +
       '<button class="opcion" data-a="medio" data-m="transferencia" aria-pressed="' + (P.medio === 'transferencia') + '">Transferencia</button></div></div>' +
       '<div class="campo"><span style="font-size:15px;font-weight:600">Mes que paga</span><div class="tres">' + meses.map(function (m) {
@@ -468,16 +538,19 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     return h;
   }
 
+  // La lista de quién debe está solo acá. Con ‹ › se ven los meses anteriores (no hace falta señal: los pagos están todos).
   function vElegirCobro() {
-    var mes = mesDe(hoy()), r = resumenMes(mes), q = S.buscar.trim().toLowerCase();
-    var h = '<header><h1>Cobros</h1><p class="sub">' + esc(nombreMes(mes)) + '</p></header><main>' +
+    var mes = S.mesCobro, r = resumenMes(mes), q = S.buscar.trim().toLowerCase(), nomMes = MESES[Number(mes.slice(5)) - 1];
+    var h = '<header><div class="fila"><p class="sub">' + esc(nombreMes(mes)) + '</p><div class="dianav"><button data-a="mesCobro" data-n="-1" aria-label="Mes anterior">‹</button><button data-a="mesCobro" data-n="1" aria-label="Mes siguiente">›</button></div></div>' +
+      '<h1>Cobros</h1>' + sync() + '</header><main>' +
+      (mes !== mesDe(hoy()) ? '<button class="btn sec" data-a="mesCobroHoy">Volver a ' + esc(MESES[Number(mesDe(hoy()).slice(5)) - 1]) + '</button>' : '') +
       '<div class="campo"><label for="b-cobro">Buscar alumno</label><input id="b-cobro" type="search" data-campo="buscar" value="' + esc(S.buscar) + '" placeholder="Nombre"></div>';
     var lista = q ? D.alumnos.filter(function (a) { return a.activo && a.nombre.toLowerCase().indexOf(q) >= 0; }).sort(porNombre).map(function (a) { return { a: a }; }) : r.deben;
-    h += '<h2>' + (q ? 'Resultados' : 'Deben ' + MESES[Number(mes.slice(5)) - 1]) + '</h2><ul class="lista">';
+    h += '<h2>' + (q ? 'Resultados' : 'Deben ' + nomMes + ' (' + r.deben.length + ')') + '</h2><ul class="lista">';
     if (!lista.length) h += '<li class="vacio">' + (q ? 'No encontré a nadie con ese nombre.' : 'Pagaron todos.') + '</li>';
     lista.forEach(function (x) {
-      var g = grupo(x.a.grupo), e = estadoPago(x.a, mes);
-      h += '<li class="alumno"><button class="nom" data-a="cobrar" data-id="' + esc(x.a.id) + '"><b>' + esc(x.a.nombre) + '</b><span class="chico muted">' + esc(g ? g.nombre : '') + '</span><span class="estado ' + e.cls + '">' + esc(e.txt) + '</span></button></li>';
+      var g = grupo(valoresEn(x.a, mes).grupo), e = estadoPago(x.a, mes);
+      h += '<li class="alumno"><button class="nom" data-a="cobrar" data-id="' + esc(x.a.id) + '" data-mes="' + mes + '"><b>' + esc(x.a.nombre) + '</b><span class="chico muted">' + esc(g ? g.nombre : '') + '</span><span class="estado ' + e.cls + '">' + esc(e.txt) + '</span></button></li>';
     });
     return h + '</ul></main>';
   }
@@ -532,10 +605,14 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     pagos.forEach(function (p, k) {
       h += (k ? '<div style="height:1px;background:var(--line)"></div>' : '') +
         '<div class="fila" style="min-height:44px"><span>' + esc(nombreMes(p.mes)) + '<br><span class="muted chico">' + esc(fechaCorta(p.fecha)) + ' · ' + esc(p.medio) + '</span></span><b class="ok">' + plata(p.monto) + '</b></div>' +
-        '<div style="display:flex;justify-content:flex-end;gap:8px">' +
-        '<button class="chip" style="border:0;cursor:pointer;min-height:40px;padding:0 14px" data-a="editarPago" data-id="' + esc(p.id) + '" aria-label="Editar pago de ' + esc(nombreMes(p.mes)) + '">Editar</button>' +
-        (S.borrarId === p.id ? '<button class="chip debe" style="border:0;cursor:pointer;min-height:40px;padding:0 14px" data-a="borrarPagoSi" data-id="' + esc(p.id) + '">¿Borrar? Sí</button>'
-          : '<button class="chip" style="border:0;cursor:pointer;min-height:40px;padding:0 14px;background:var(--pista);color:var(--muted)" data-a="borrarPago" data-id="' + esc(p.id) + '" aria-label="Borrar pago de ' + esc(nombreMes(p.mes)) + '">Borrar</button>') + '</div>';
+        // Al tocar Borrar, donde estaba el botón aparece la pregunta (un doble toque no hace nada) y los botones bajan un renglón.
+        (S.borrarId === p.id
+          ? '<div style="display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px"><span class="mal" style="font-weight:700;flex-basis:100%;min-height:44px;display:flex;align-items:center">¿Borrar este pago?</span>' +
+            '<button class="chip debe" style="border:2px solid var(--debe);cursor:pointer;min-height:44px;padding:0 14px" data-a="borrarPagoSi" data-id="' + esc(p.id) + '">Sí, borrar</button>' +
+            '<button class="chip" style="border:0;cursor:pointer;min-height:44px;min-width:96px;padding:0 14px" data-a="borrarNo">No</button></div>'
+          : '<div style="display:flex;justify-content:flex-end;gap:8px">' +
+            '<button class="chip" style="border:0;cursor:pointer;min-height:44px;padding:0 14px" data-a="editarPago" data-id="' + esc(p.id) + '" aria-label="Editar pago de ' + esc(nombreMes(p.mes)) + '">Editar</button>' +
+            '<button class="chip" style="border:0;cursor:pointer;min-height:44px;min-width:96px;padding:0 14px;background:var(--pista);color:var(--muted)" data-a="borrarPago" data-id="' + esc(p.id) + '" aria-label="Borrar pago de ' + esc(nombreMes(p.mes)) + '">Borrar</button></div>');
     });
     h += '</section>' + (a.notas ? '<section class="card"><h2 class="sub" style="font-weight:600">Notas</h2><p style="margin:0;white-space:pre-line">' + esc(a.notas) + '</p></section>' : '') +
       '<div class="dos"><button class="btn" data-a="cobrar" data-id="' + esc(a.id) + '">Registrar pago</button>' +
@@ -548,7 +625,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var E = S.edit;
     var h = '<header><button class="volver" data-a="cancelarEdit">‹ Volver</button><h1>' + (E.id ? 'Editar alumno' : 'Nuevo alumno') + '</h1></header><main>' +
       '<div class="campo"><label for="e-nombre">Nombre</label><input id="e-nombre" type="text" data-campo="nombre" value="' + esc(E.nombre) + '"></div>' +
-      '<div class="campo"><label for="e-grupo">Grupo</label><select id="e-grupo" data-campo="grupo">' + D.grupos.filter(function (g) { return g.activo !== false || g.id === E.grupo; }).sort(porHora).map(function (g) {
+      '<div class="campo"><label for="e-grupo">Grupo</label><select id="e-grupo" data-campo="grupo">' + (E.grupo ? '' : '<option value="" selected>Elegí el grupo</option>') + D.grupos.filter(function (g) { return g.activo !== false || g.id === E.grupo; }).sort(porHora).map(function (g) {
         return '<option value="' + esc(g.id) + '"' + (g.id === E.grupo ? ' selected' : '') + '>' + esc(g.nombre) + (g.activo === false ? ' (cerrado)' : '') + '</option>';
       }).join('') + '</select></div>' +
       '<div class="campo"><label for="e-cuota">Cuota por mes</label><input id="e-cuota" class="monto" type="text" inputmode="numeric" data-campo="cuota" value="' + esc(E.cuota ? plata(E.cuota) : '') + '"></div>' +
@@ -556,9 +633,32 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<div class="campo"><label for="e-desde">Alumno desde</label><input id="e-desde" type="text" data-campo="desde" value="' + esc(E.desde) + '" placeholder="Año, ej. 2019"></div>' +
       '<div class="campo"><label for="e-notas">Notas</label><textarea id="e-notas" data-campo="notas">' + esc(E.notas) + '</textarea></div>' +
       (E.error ? '<p class="err">' + esc(E.error) + '</p>' : '') +
-      '<button class="btn" data-a="guardarEdit"' + (E.guardando ? ' disabled' : '') + '>' + (E.guardando ? 'Guardando…' : 'Guardar') + '</button>' +
-      (E.id ? '<button class="btn sec" data-a="activo">' + (E.activo ? 'Dar de baja' : 'Volver a dar de alta') + '</button>' : '') + '</main>';
+      (E.pregunta ? preguntaDesde(E) :
+        '<button class="btn" data-a="guardarEdit"' + (E.guardando ? ' disabled' : '') + '>' + (E.guardando ? 'Guardando…' : 'Guardar') + '</button>' +
+        (E.id ? '<div style="height:1px;background:var(--line);margin:8px 0"></div><button class="btn ' + (E.activo ? 'peligro' : 'sec') + '" data-a="activo"' + (E.guardando ? ' disabled' : '') + '>' + (E.activo ? 'Dar de baja' : 'Volver a dar de alta') + '</button>' : '')) + '</main>';
     return h;
+  }
+
+  // Cambio de grupo, de cuota o de estado: ¿cuenta para este mes o recién para el que viene?
+  function preguntaDesde(E) {
+    var m = mesDe(hoy()), este = MESES[Number(m.slice(5)) - 1], prox = MESES[Number(sumarMes(m, 1).slice(5)) - 1];
+    var o = E.orig || {}, titulo, detalle = [], ayuda;
+    if (E.pregunta === 'estado') {
+      titulo = E.activo ? '¿Dar de baja a ' + E.nombre.trim() + '?' : '¿Volver a dar de alta a ' + E.nombre.trim() + '?';
+      ayuda = E.activo ? ['No figura más en ' + este + ' (ni como deudor).', 'Sigue contando en ' + este + ': si no pagó, lo sigue debiendo.']
+        : ['Cuenta desde ' + este + ': si no pagó, figura como deudor.', 'Cuenta recién desde ' + prox + '.'];
+    } else {
+      titulo = '¿Desde cuándo vale el cambio?';
+      if (E.cuota !== o.cuota) detalle.push('Cuota: ' + plata(o.cuota || 0) + ' → ' + plata(E.cuota || 0) + '.');
+      if (E.grupo !== o.grupo) { var g1 = grupo(o.grupo), g2 = grupo(E.grupo); detalle.push('Grupo: ' + (g1 ? g1.nombre : '—') + ' → ' + (g2 ? g2.nombre : '—') + '.'); }
+      ayuda = [este.charAt(0).toUpperCase() + este.slice(1) + ' ya cuenta con el cambio.',
+        este.charAt(0).toUpperCase() + este.slice(1) + ' sigue como estaba' + (E.cuota !== o.cuota ? ' (si ya pagó ' + este + ' con la cuota de antes, es esta).' : '.')];
+    }
+    return '<div class="pregunta" role="group" aria-label="' + esc(titulo) + '"><b style="font-size:18px">' + esc(titulo) + '</b>' +
+      (detalle.length ? '<span class="muted">' + esc(detalle.join(' ')) + '</span>' : '') +
+      '<button class="opcion" data-a="editDesde" data-vale="este"' + (E.guardando ? ' disabled' : '') + '>' + (E.pregunta === 'estado' ? 'Sí, ' : '') + 'desde este mes (' + este + ')<small>' + esc(ayuda[0]) + '</small></button>' +
+      '<button class="opcion" data-a="editDesde" data-vale="proximo"' + (E.guardando ? ' disabled' : '') + '>' + (E.pregunta === 'estado' ? 'Sí, ' : '') + 'desde ' + prox + '<small>' + esc(ayuda[1]) + '</small></button>' +
+      '<button class="btn sec" data-a="editNo"' + (E.guardando ? ' disabled' : '') + '>' + (E.pregunta === 'estado' ? 'No' : 'Cancelar') + '</button></div>';
   }
 
   function vPanel() {
@@ -569,11 +669,13 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var pagaron = activos - r.deben.length - r.sinCuota;
     var h = '<header><div class="fila"><p class="sub">' + esc(nombreMes(mes)) + '</p><div class="dianav"><button data-a="mesPanel" data-n="-1" aria-label="Mes anterior">‹</button><button data-a="mesPanel" data-n="1" aria-label="Mes siguiente">›</button></div></div>' +
       '<h1>Panel</h1>' + sync() + '</header><main>' +
-      '<section class="card"><span class="sub">Cobrado</span><div style="display:flex;align-items:baseline;gap:6px"><span class="grande" style="font-size:32px">' + plata(r.cobrado) + '</span><span class="muted chico">de ' + plata(r.esperado) + '</span></div>' +
+      '<section class="card"><span class="sub">Cobrado</span><div style="display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px"><span class="grande" style="font-size:32px">' + plata(r.cobrado) + '</span><span class="muted chico">de ' + plata(r.esperado) + '</span></div>' +
       '<div class="pista" style="height:12px"><div style="width:' + pct(r.cobrado, r.esperado) + '%"></div></div>' +
-      '<div class="tres" style="padding-top:4px"><div><div style="font-size:22px;font-weight:700">' + activos + '</div><div class="muted chico">alumnos</div></div>' +
-      '<div><div style="font-size:22px;font-weight:700" class="ok">' + Math.max(0, pagaron) + '</div><div class="muted chico">pagaron</div></div>' +
-      '<div><div style="font-size:20px;font-weight:700" class="mal">' + plata(Math.max(0, r.esperado - r.cobrado)) + '</div><div class="muted chico">falta cobrar</div></div></div></section>' +
+      '<div class="dos" style="padding-top:4px"><div><div style="font-size:22px;font-weight:700">' + activos + '</div><div class="muted chico">alumnos</div></div>' +
+      '<div><div style="font-size:22px;font-weight:700" class="ok">' + Math.max(0, pagaron) + '</div><div class="muted chico">pagaron</div></div></div>' +
+      '<div class="fila" style="flex-wrap:wrap"><span class="muted">Falta cobrar</span><b class="mal" style="font-size:20px">' + plata(Math.max(0, r.esperado - r.cobrado)) + '</b></div>' +
+      // Quién debe está en Cobros (un solo lugar); acá solo el atajo, al mismo mes.
+      '<button class="btn sec" data-a="verDeben">' + (r.deben.length ? 'Ver quién debe ' + MESES[Number(mes.slice(5)) - 1] + ' (' + r.deben.length + ')' : 'Pagaron todos') + '</button></section>' +
       '<section style="display:flex;flex-direction:column;gap:10px"><h2>Por grupo</h2>';
     r.grupos.sort(function (a, b) { return porHora(a.g, b.g); }).forEach(function (x) {
       var clases = D.asistencias.filter(function (y) { return y.grupo === x.g.id && mesDe(y.fecha) === mes; }).length;
@@ -585,13 +687,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         '<div class="muted chico">' + clases + (clases === 1 ? ' presente' : ' presentes') + ' en el mes</div>' +
         '<button class="btn sec" style="min-height:48px;font-size:16px" data-a="verAsist" data-g="' + esc(x.g.id) + '">Ver asistencias</button></div>';
     });
-    h += '</section><section style="display:flex;flex-direction:column;gap:10px"><h2>Deben ' + MESES[Number(mes.slice(5)) - 1] + ' (' + r.deben.length + ')</h2><ul class="lista">';
-    if (!r.deben.length) h += '<li class="vacio">Pagaron todos.</li>';
-    r.deben.forEach(function (x) {
-      var g = grupo(valoresEn(x.a, mes).grupo);
-      h += '<li class="alumno"><button class="nom" data-a="cobrar" data-id="' + esc(x.a.id) + '" data-mes="' + mes + '"><b>' + esc(x.a.nombre) + '</b><span class="chico muted">' + esc(g ? g.nombre : '') + '</span></button><span class="chip debe" style="margin-right:6px">' + plata(x.falta) + '</span></li>';
-    });
-    h += '</ul></section>' +
+    h += '</section>' +
       (D.planilla ? '<a class="btn sec" href="' + esc(D.planilla) + '" target="_blank" rel="noopener">Abrir la planilla</a>' : '') +
       '<button class="btn sec" data-a="tutoAbrir">Ver el tutorial</button>' +
       '<button class="btn sec" data-a="ir" data-v="conectar">Cambiar conexión</button>' +
@@ -659,8 +755,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<div class="campo"><label for="g-sede">Lugar</label><input id="g-sede" type="text" data-campo="sede" value="' + esc(G.sede) + '" placeholder="Ej. Bonzi"></div>' +
       (sedes.length ? '<div class="filtros">' + sedes.map(function (x) { return '<button data-a="grupoSede" data-s="' + esc(x) + '" aria-pressed="' + (G.sede === x) + '">' + esc(x) + '</button>'; }).join('') + '</div>' : '') +
       '<div class="campo"><label for="g-hora">Hora</label><input id="g-hora" type="time" data-campo="hora" value="' + esc(G.hora ? (G.hora.length === 4 ? '0' + G.hora : G.hora) : '') + '"></div>' +
-      '<div class="campo"><span style="font-size:15px;font-weight:600">Días</span><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px">' +
-      LETRAS.map(function (l) { return '<button class="opcion" style="padding:0" data-a="grupoDia" data-l="' + l + '" aria-pressed="' + (G.dias.indexOf(l) >= 0) + '" aria-label="' + NOMBRE_LETRA[l] + '">' + l + '</button>'; }).join('') +
+      '<div class="campo"><span style="font-size:15px;font-weight:600">Días</span><div class="dias7">' +
+      LETRAS.map(function (l) { return '<button class="opcion" data-a="grupoDia" data-l="' + l + '" aria-pressed="' + (G.dias.indexOf(l) >= 0) + '" aria-label="' + NOMBRE_LETRA[l] + '">' + l + '</button>'; }).join('') +
       '</div><span class="muted chico">' + esc(diasLargos(G.dias.join(',')) || 'Elegí al menos un día') + '</span></div>' +
       (G.error ? '<p class="err">' + esc(G.error) + '</p>' : '') +
       '<button class="btn" data-a="grupoGuardar"' + (G.guardando ? ' disabled' : '') + '>' + (G.guardando ? 'Guardando…' : (nuevo ? 'Crear clase' : (G.activo === false ? 'Guardar y volver a abrir' : 'Guardar cambios'))) + '</button>' +
@@ -677,11 +773,15 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       h += '<div class="card"><b style="font-size:17px">' + n + (n === 1 ? ' alumno sigue' : ' alumnos siguen') + ' en este grupo. ¿Qué hacemos?</b>' +
         otros.map(function (g) { return '<button class="opcion" style="text-align:left;padding:0 14px" data-a="cerrarDestino" data-g="' + esc(g.id) + '" aria-pressed="' + (G.destino === g.id) + '">Pasarlos a ' + esc(g.nombre) + '</button>'; }).join('') +
         '<button class="opcion" style="text-align:left;padding:0 14px" data-a="cerrarDestino" data-g="" aria-pressed="' + (G.destino === '') + '">Darlos de baja</button></div>';
+      var m = mesDe(hoy()), este = MESES[Number(m.slice(5)) - 1], prox = MESES[Number(sumarMes(m, 1).slice(5)) - 1];
+      h += '<div class="card"><b style="font-size:17px">¿Desde cuándo?</b>' +
+        '<button class="opcion" style="text-align:left;padding:10px 14px;line-height:1.3" data-a="cerrarVale" data-vale="este" aria-pressed="' + (G.vale === 'este') + '">Desde este mes (' + este + ')<small style="display:block;font-size:14px;font-weight:500;color:var(--muted)">' + (G.destino ? 'Lo que falta cobrar de ' + este + ' ya cuenta en el otro grupo.' : 'No figuran más en ' + este + ' (ni como deudores).') + '</small></button>' +
+        '<button class="opcion" style="text-align:left;padding:10px 14px;line-height:1.3" data-a="cerrarVale" data-vale="proximo" aria-pressed="' + (G.vale === 'proximo') + '">Desde ' + prox + '<small style="display:block;font-size:14px;font-weight:500;color:var(--muted)">' + (G.destino ? este.charAt(0).toUpperCase() + este.slice(1) + ' sigue contando en este grupo.' : 'Si deben ' + este + ', lo siguen debiendo.') + '</small></button></div>';
     } else h += '<p class="muted" style="margin:0">No tiene alumnos activos.</p>';
-    var listo = !n || G.destino != null;
+    var listo = !n || (G.destino != null && !!G.vale);
     h += (G.error ? '<p class="err">' + esc(G.error) + '</p>' : '') +
       '<button class="btn" style="background:var(--debe-bg);border-color:var(--debe);color:var(--debe)" data-a="cerrarSi"' + (!listo || G.guardando ? ' disabled' : '') + '>' +
-      (G.guardando ? 'Cerrando…' : (listo ? 'Cerrar el grupo' : 'Elegí qué hacer con los alumnos')) + '</button></main>';
+      (G.guardando ? 'Cerrando…' : (listo ? 'Cerrar el grupo' : (G.destino == null ? 'Elegí qué hacer con los alumnos' : 'Elegí desde cuándo'))) + '</button></main>';
     return h;
   }
 
@@ -689,14 +789,14 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 5;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 6;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
   var demoClase = '<div class="clase" style="padding:0;overflow:hidden;align-items:stretch;gap:0"><span style="display:flex;flex-grow:1;padding:12px 8px 12px 14px"><span class="txt"><b style="font-size:19px;font-weight:700">9:00 · Bonzi</b><span class="muted chico">Lunes, Jueves</span><span class="chip fuerte">Pasar lista</span></span></span>' +
     '<span style="width:44px;border-left:1px solid var(--line);background:#F2F8F4;color:var(--verde-texto);display:flex;align-items:center;justify-content:center">' + LAPIZ + '</span></div>';
   var TUTO = [
-    { t: '¡Hola, Héctor!', p: 'Esta app es tu planilla de Tai Chi, pero cómoda para el celular. Todo lo que hagas acá se guarda solo en la planilla. No hay que apretar "guardar" en ningún lado, salvo al cobrar.',
+    { t: '¡Hola, Héctor!', p: 'Esta app es tu planilla de Tai Chi, pero cómoda para el celular. Todo lo que hagas acá queda en la planilla. Los presentes se guardan solos con cada toque; al cobrar o al cambiar datos, tocás "Guardar".',
       demo: '', arriba: true },
     { t: 'Si no hay señal', p: 'Podés pasar lista y cobrar igual. Lo que hagas queda guardado en el celular y se manda solo cuando vuelve la señal. Mientras tanto, arriba aparece un aviso en naranja. No cierres sesión ni borres los datos del navegador hasta que desaparezca.',
       demo: '<span class="estado-sync mal" style="font-size:15px">Sin señal. 2 cambios guardados en el celular: se mandan solos cuando vuelva la señal.</span>' },
@@ -710,12 +810,12 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     { t: 'Marcar quién vino', p: 'Tocá el cuadradito al lado de cada alumno que vino: se pone verde. Si te equivocaste, tocalo otra vez y se borra.',
       demo: '<div class="alumno"><span class="nom"><b>Maria Pia</b><span class="estado ok">Pagó noviembre</span></span><span class="tilde" aria-pressed="true">' + IC.tilde + '</span></div>' +
         '<div class="alumno"><span class="nom"><b>Gustavo</b><span class="estado mal">Debe noviembre</span></span><span class="tilde" aria-pressed="false">' + IC.tilde + '</span></div>' },
-    { t: 'Cobrar', p: 'Cuando alguien te paga, tocá "Cobrar" debajo de su nombre (o buscalo en Cobros). El monto ya viene puesto. Elegí efectivo o transferencia y tocá "Guardar pago".',
-      demo: '<div class="alumno" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 14px"><span class="nom" style="padding:0;min-height:0"><b>Gustavo</b><span class="estado mal">Debe noviembre · $55.000</span></span><span class="chip debe">Cobrar</span></div><div class="btn">Guardar pago</div>' },
-    { t: 'Corregir un cobro', p: 'Si te equivocaste en un cobro, andá a la ficha del alumno (tocá su nombre). En "Pagos" tocá "Editar" para cambiar el monto, la forma de pago o el mes. Si el pago no corresponde, tocá "Borrar" y después "¿Borrar? Sí".',
+    { t: 'Cobrar', p: 'Cuando alguien te paga, tocá "Cobrar" debajo de su nombre (o buscalo en Cobros). Cobra el mes de esa clase y el monto ya viene puesto. Elegí efectivo o transferencia y tocá "Guardar pago".',
+      demo: '<div class="alumno" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 14px"><span class="nom" style="padding:0;min-height:0"><b>Gustavo</b><span class="estado mal">Debe noviembre · $55.000</span></span><span class="chip debe">Cobrar noviembre</span></div><div class="btn">Guardar pago</div>' },
+    { v: 6, t: 'Corregir un cobro', p: 'Si te equivocaste en un cobro, andá a la ficha del alumno (tocá su nombre). En "Pagos" tocá "Editar" para cambiar el monto, la forma de pago o el mes. Si el pago no corresponde, tocá "Borrar": te pregunta si estás seguro, y para borrarlo tocás "Sí, borrar" (a la izquierda).',
       demo: '<div class="fila"><span>Noviembre 2026<br><span class="muted chico">2/11 · efectivo</span></span><b class="ok">$55.000</b></div>' +
         '<div style="display:flex;justify-content:flex-end;gap:8px"><span class="chip" style="padding:8px 14px">Editar</span><span class="chip" style="padding:8px 14px;background:var(--pista);color:var(--muted)">Borrar</span></div>' },
-    { t: 'Alumnos y Panel', p: 'En Alumnos podés buscar a alguien, ver sus pagos, cambiarle la cuota, agregar alumnos nuevos o darlos de baja. En Panel ves cuánto cobraste en el mes y quién debe.',
+    { t: 'Alumnos y Panel', p: 'En Alumnos podés buscar a alguien, ver sus pagos, cambiarle la cuota, agregar alumnos nuevos o darlos de baja. En Panel ves cuánto cobraste en el mes y cómo va cada grupo.',
       demo: '<div class="btn">+ Nuevo alumno</div>' },
     { v: 2, t: 'Ver quién vino a cada grupo', p: 'Entrá a un grupo y abajo de todo tocá "Ver asistencias" (también está en cada grupo del Panel). Ahí ves cuántas veces vino cada alumno en el mes y qué días, quién no vino, y quiénes ya no están en el grupo. Con las flechas ‹ › cambiás de mes.',
       demo: '<div class="btn sec" style="min-height:44px;font-size:16px">Ver asistencias</div>' +
@@ -725,6 +825,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       demo: '<div class="btn" style="font-size:15px">+ Nueva clase</div>' + demoClase.replace('chip fuerte">Pasar lista', 'chip">Ver grupo') },
     { v: 5, t: 'La clase anterior', p: 'Adentro de un grupo, arriba, tocá "‹ Anterior" para ir a la clase anterior de ese grupo y ver quién vino (o corregirlo). "Próxima ›" te vuelve hacia hoy. Si está gris, es que la próxima clase todavía no llegó: abajo dice qué día es. Las flechas saltan solo a los días del grupo; si no te lleva al día que buscás, revisá los días con el lápiz del grupo.',
       demo: '<div class="dos"><span class="btn sec" style="min-height:44px;font-size:15px">‹ Anterior</span><span class="btn sec" style="min-height:44px;font-size:15px">Próxima ›</span></div><b style="font-size:16px">Lunes 2 de noviembre</b>' },
+    { v: 6, t: 'Quién debe', p: 'La lista de quién debe está en Cobros. Con las flechas ‹ › de arriba ves los meses anteriores, y tocando a alguien le cobrás ese mes. Desde el Panel, el botón "Ver quién debe" te lleva ahí.',
+      demo: '<div class="fila"><b>Octubre 2026</b><span style="display:flex;gap:4px"><span class="btn sec" style="min-height:40px;width:40px;padding:0">‹</span><span class="btn sec" style="min-height:40px;width:40px;padding:0">›</span></span></div>' +
+        '<div class="alumno"><span class="nom"><b>Gustavo</b><span class="estado mal">Debe octubre · $55.000</span></span></div>' },
+    { v: 6, t: 'Cambios a mitad de mes', p: 'Cuando le cambiás la cuota o el grupo a alguien, o lo das de baja, la app te pregunta desde qué mes vale. Si ya te pagó este mes con la cuota de antes, o si te debe este mes y se va, elegí el mes que viene.',
+      demo: '<div class="opcion" style="text-align:left;padding:10px 14px">Desde este mes</div><div class="opcion" style="text-align:left;padding:10px 14px">Desde el mes que viene</div>' },
     { t: 'Listo', p: 'Si te perdés, tocá "Ayuda" arriba en Grupos y vuelve este tutorial. Y si algo no anda, avisale a Ariel.',
       demo: '' }
   ];
@@ -787,9 +892,44 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   function nuevoPago(aid, mes) {
     var a = alumno(aid); mes = mes || mesDe(hoy());
-    var cuota = valoresEn(a, mes).cuota || a.cuota;
-    var falta = Math.max(0, cuota - pagado(aid, mes));
-    S.pago = { id: id(), alumno: aid, monto: falta || cuota, medio: 'efectivo', mes: mes, fecha: hoy(), error: null, guardando: false };
+    function falta(m) { var c = valoresEn(a, m).cuota || a.cuota; return { cuota: c, falta: Math.max(0, c - pagado(aid, m)) }; }
+    var f = falta(mes), aviso = null;
+    // Si ese mes ya está pago completo, no se sugiere cobrarlo de nuevo: se propone el mes siguiente.
+    if (f.cuota > 0 && !f.falta) {
+      var sig = sumarMes(mes, 1), fs = falta(sig), nm = MESES[Number(mes.slice(5)) - 1];
+      if (fs.falta) { aviso = 'Ya pagó ' + nm + ' completo: puse ' + MESES[Number(sig.slice(5)) - 1] + '.'; mes = sig; f = fs; }
+    }
+    S.pago = { id: id(), alumno: aid, monto: f.falta, medio: 'efectivo', mes: mes, fecha: hoy(), aviso: aviso, error: null, guardando: false };
+  }
+
+  // Si la app quedó abierta de un día para otro, "hoy" pasa a ser el día nuevo.
+  var diaBase = hoy();
+  function chequearDia() {
+    var h = hoy(); if (h === diaBase) return;
+    if (S.fecha === diaBase) S.fecha = h;
+    if (S.mesPanel === mesDe(diaBase)) S.mesPanel = mesDe(h);
+    if (S.mesCobro === mesDe(diaBase)) S.mesCobro = mesDe(h);
+    diaBase = h;
+  }
+
+  // La pregunta aparece abajo de todo: se lleva a la vista para que se vean las opciones.
+  function verPregunta() { var q = document.querySelector('.pregunta'); if (q && q.scrollIntoView) q.scrollIntoView({ block: 'start' }); }
+
+  // Manda un alumno (alta o cambio). activo y vale se pasan aparte: el formulario no cambia hasta que se guardó.
+  function enviarEdit(E, activo, vale) {
+    E.guardando = true; E.error = null; render();
+    var envio = { id: E.id || E.idNuevo, nuevo: !E.id, nombre: E.nombre.trim(), grupo: E.grupo, cuota: E.cuota, telefono: E.telefono, desde: E.desde, notas: E.notas,
+      activo: activo == null ? E.activo : activo, vale: vale || 'este' };
+    llamar('guardarAlumno', { a: envio }).then(function (guardado) {
+      var a = { id: guardado.id, nombre: String(guardado.nombre), grupo: guardado.grupo, cuota: Number(guardado.cuota) || 0,
+        telefono: String(guardado.telefono || ''), desde: String(guardado.desde || ''), activo: guardado.activo !== false, notas: String(guardado.notas || '') };
+      var i = D.alumnos.findIndex(function (x) { return x.id === a.id; });
+      if (i >= 0) D.alumnos[i] = a; else D.alumnos.push(a);
+      cambios++; guardarCache();
+      toast(E.id ? (envio.activo !== E.activo ? (envio.activo ? 'Dado de alta otra vez' : 'Dado de baja') : 'Guardado') : 'Alumno agregado');
+      S.edit = null; S.alumno = a.id; S.volver = 'alumnos'; S.vista = 'ficha'; render();
+      cargar(); // trae el historial de cuotas actualizado
+    }).catch(function (e) { E.guardando = false; E.pregunta = null; E.error = (sinSenalReal(e) ? 'Sin señal: esto necesita conexión. No se guardó nada.' : 'No se guardó (' + e.message + ').'); render(); });
   }
 
   // ---------- Acciones ----------
@@ -822,6 +962,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       if (yaExiste) G.sede = yaExiste.sede;
       // Guardar un grupo cerrado lo vuelve a abrir.
       llamar('guardarGrupo', { g: { id: G.id, sede: G.sede.trim(), hora: hora, dias: G.dias.join(','), activo: true } }).then(function (g) {
+        cambios++;
         var i = D.grupos.findIndex(function (x) { return x.id === g.id; });
         if (i >= 0) D.grupos[i] = g; else D.grupos.push(g);
         toast(G.id ? (G.activo === false ? 'Grupo abierto de nuevo' : 'Grupo guardado') : 'Clase creada: ' + g.nombre);
@@ -833,9 +974,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     cerrarDestino: function (d) { S.gedit.destino = d.g; render(); },
     cerrarSi: function () {
       var G = S.gedit;
-      if (cuantos(G.id) && G.destino == null) return;
+      if (cuantos(G.id) && (G.destino == null || !G.vale)) return;
       G.guardando = true; G.error = null; render();
-      llamar('cerrarGrupo', { id: G.id, destino: G.destino || '' }).then(function (r) {
+      llamar('cerrarGrupo', { id: G.id, destino: G.destino || '', vale: G.vale || 'este' }).then(function (r) {
+        cambios++;
         toast('Grupo cerrado' + (r.alumnos ? (G.destino ? ': ' + r.alumnos + ' movidos' : ': ' + r.alumnos + ' dados de baja') : ''));
         S.gedit = null; ir('hoy'); cargar();
       }).catch(function (e) { G.guardando = false; G.error = (e.red ? 'Sin señal: esto necesita conexión.' : 'No se cerró (' + e.message + ').'); render(); });
@@ -846,7 +988,18 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     },
     tutoAnt: function () { S.tuto = Math.max(0, S.tuto - 1); render(); },
     tutoCerrar: function () { S.tuto = null; S.tutoNovedad = false; marcarTutoVisto(); render(); },
-    ir: function (d) { if (d.v === 'conectar') { S.error = null; } ir(d.v); },
+    ir: function (d) {
+      if (d.v === 'conectar') { S.error = null; S.conn = null; }
+      // La barra de abajo vuelve siempre a hoy (Grupos) y al mes actual (Cobros).
+      if (d.barra && d.v === 'hoy') S.fecha = hoy();
+      if (d.barra && d.v === 'cobro') S.mesCobro = mesDe(hoy());
+      ir(d.v);
+    },
+    rechazoVisto: function (d) { rechazos.splice(Number(d.i), 1); guardarRechazos(); render(); },
+    mesCobro: function (d) { S.mesCobro = sumarMes(S.mesCobro, Number(d.n)); render(); },
+    mesCobroHoy: function () { S.mesCobro = mesDe(hoy()); render(); },
+    verDeben: function () { S.mesCobro = S.mesPanel; S.buscar = ''; S.pago = null; S.vista = 'cobro'; window.scrollTo(0, 0); render(); },
+    cerrarVale: function (d) { S.gedit.vale = d.vale; render(); },
     recargar: function () { cargar(); render(); },
     hoyBtn: function () { S.fecha = hoy(); render(); asegurarMes(); },
     dia: function (d) { S.fecha = sumarDias(S.fecha, Number(d.n)); render(); asegurarMes(); },
@@ -872,18 +1025,27 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       P.guardando = true; P.error = null; render();
       var envio = { id: P.id, alumno: P.alumno, monto: P.monto, medio: P.medio, mes: P.mes, fecha: P.fecha };
       if (P.editando) {
-        // Si ese pago todavía no llegó a la planilla, se corrige en la cola.
-        var enCola = cola.find(function (x) { return x.accion === 'pagar' && x.datos.p.id === envio.id; });
-        if (enCola) {
-          enCola.datos.p = envio; guardarCola();
+        // Si ese pago todavía tiene algo en la cola, la corrección va por la cola:
+        // si lo último pendiente no salió todavía, se corrige ahí; si ya está saliendo, va detrás.
+        var pend = cola.filter(function (x) { return (x.accion === 'pagar' || x.accion === 'editarPago') && x.datos.p.id === envio.id; });
+        if (pend.length) {
+          var ult = pend[pend.length - 1];
+          if (ult === cola[0] && enviando) cola.push({ accion: 'editarPago', datos: { p: envio } });
+          else ult.datos.p = envio;
+          guardarCola();
           var y = D.pagos.find(function (q) { return q.id === envio.id; }); if (y) Object.assign(y, envio);
-          toast('Pago corregido (se manda cuando haya señal)');
-          S.pago = null; S.vista = S.volverPago || 'ficha'; render(); vaciarCola();
+          guardarCache();
+          S.pago = null; S.vista = S.volverPago || 'ficha'; render();
+          vaciarCola().then(function () {
+            var sigue = cola.some(function (x) { return x.datos.p && x.datos.p.id === envio.id; });
+            toast(sigue ? 'Sin señal: la corrección quedó guardada en el celular' : 'Pago corregido: ' + plata(envio.monto));
+          });
           return;
         }
         llamar('editarPago', { p: envio }).then(function () {
           var x = D.pagos.find(function (q) { return q.id === envio.id; });
           if (x) Object.assign(x, envio);
+          cambios++; guardarCache();
           toast('Pago corregido: ' + plata(envio.monto));
           var v = S.volverPago || 'ficha'; S.pago = null; S.vista = v; render();
         }).catch(function (e) {
@@ -893,12 +1055,13 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       }
       // Cobro nuevo: queda anotado en el celular y se manda (ahora o cuando haya señal).
       // El id evita duplicados si un envío se corta y se repite.
-      if (!D.pagos.some(function (x) { return x.id === envio.id; })) D.pagos.push(envio);
+      if (!D.pagos.some(function (x) { return x.id === envio.id; })) D.pagos.push(Object.assign({}, envio));
       var v = S.volverPago || 'cobro'; S.pago = null; S.vista = v; render();
       encolar('pagar', { p: envio }).then(function () {
         var pendiente = cola.some(function (x) { return x.accion === 'pagar' && x.datos.p.id === envio.id; });
         var nom = alumno(envio.alumno) ? alumno(envio.alumno).nombre : '';
-        if (!D.pagos.some(function (x) { return x.id === envio.id; })) return; // falló: ya avisó falloCola
+        if (!D.pagos.some(function (x) { return x.id === envio.id; })) return; // la planilla lo rechazó: queda el aviso arriba
+        if (S.claveMal) return toast('El pago quedó guardado en el celular: falta volver a conectar', true);
         toast(pendiente ? 'Sin señal: el pago de ' + nom + ' quedó guardado en el celular' : 'Pago guardado: ' + plata(envio.monto) + ' de ' + nom);
       });
     },
@@ -909,63 +1072,86 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         editando: true, montoOriginal: p.monto, mesOriginal: p.mes, error: null, guardando: false };
       S.volverPago = S.vista; S.vista = 'cobro'; window.scrollTo(0, 0); render();
     },
-    borrarPago: function (d) { S.borrarId = d.id; render(); },
+    borrarPago: function (d) { S.borrarId = d.id; S.borrarListo = false; setTimeout(function () { S.borrarListo = true; }, 600); render(); },
+    borrarNo: function () { S.borrarId = null; render(); },
     borrarPagoSi: function (d) {
+      if (!S.borrarListo) return; // un doble toque sobre "Borrar" no borra
       S.borrarId = null;
       var p = D.pagos.find(function (x) { return x.id === d.id; });
       D.pagos = D.pagos.filter(function (x) { return x.id !== d.id; });
-      // Si todavía no llegó a la planilla, alcanza con sacarlo de la cola.
+      function delPago(x) { return x.datos.p && x.datos.p.id === d.id; }
       var i = cola.findIndex(function (x) { return x.accion === 'pagar' && x.datos.p.id === d.id; });
-      if (i > 0 || (i === 0 && !enviando)) { cola.splice(i, 1); guardarCola(); render(); toast('Pago borrado'); return; }
+      var saliendo = function (x) { return x === cola[0] && enviando; };
+      // Si todavía no llegó a la planilla, alcanza con sacarlo de la cola (con sus correcciones).
+      if (i >= 0 && !saliendo(cola[i])) {
+        cola = cola.filter(function (x) { return !delPago(x); }); guardarCola(); guardarCache(); render(); toast('Pago borrado'); return;
+      }
+      // Si algo de ese pago está saliendo ahora, el borrado va detrás en la cola.
+      if (cola.some(delPago)) {
+        cola = cola.filter(function (x) { return !delPago(x) || saliendo(x); });
+        cola.push({ accion: 'borrarPago', datos: { id: d.id } }); guardarCola(); guardarCache(); render();
+        vaciarCola().then(function () { toast(cola.some(function (x) { return x.accion === 'borrarPago' && x.datos.id === d.id; }) ? 'Sin señal: el borrado quedó guardado en el celular' : 'Pago borrado'); });
+        return;
+      }
       render();
-      llamar('borrarPago', { id: d.id }).then(function () { toast('Pago borrado'); }).catch(function (e) {
-        if (p) D.pagos.push(p); render(); toast('No se borró: ' + e.message, true);
+      llamar('borrarPago', { id: d.id }).then(function () { cambios++; guardarCache(); toast('Pago borrado'); }).catch(function (e) {
+        if (p) D.pagos.push(p); render(); toast('No se borró: ' + (sinSenalReal(e) ? 'sin señal, borrarlo necesita conexión' : e.message), true);
       });
     },
     toggle: function (d) {
+      if (S.fecha > hoy()) return; // la clase todavía no llegó
       var f = S.fecha, g = S.grupo, aid = d.id;
       var on = !D.asistencias.some(function (x) { return x.fecha === f && x.grupo === g && x.alumno === aid; });
       var datos = { fecha: f, grupo: g, alumno: aid, on: on };
-      aplicarPresente(datos, on); render();
+      aplicarPresente(datos, on); guardarCache(); render();
       encolar('presente', datos);
     },
     filtro: function (d) { S.filtroGrupo = d.g; render(); },
     bajas: function () { S.verBajas = !S.verBajas; render(); },
     nuevo: function () {
-      S.edit = { id: '', nombre: '', grupo: S.filtroGrupo || (abiertos()[0] && abiertos()[0].id) || '', cuota: 0, telefono: '', desde: '', notas: '', activo: true };
+      // Sin grupo elegido de antemano: si no se mira el selector, no queda en un grupo cualquiera.
+      S.edit = { id: '', idNuevo: id(), nombre: '', grupo: S.filtroGrupo || '', cuota: 0, telefono: '', desde: '', notas: '', activo: true };
       S.volverEdit = 'alumnos'; S.vista = 'editar'; window.scrollTo(0, 0); render();
     },
     editar: function () {
       var a = alumno(S.alumno);
-      S.edit = Object.assign({}, a); S.volverEdit = 'ficha'; S.vista = 'editar'; window.scrollTo(0, 0); render();
+      S.edit = Object.assign({}, a, { orig: { grupo: a.grupo, cuota: a.cuota } }); S.volverEdit = 'ficha'; S.vista = 'editar'; window.scrollTo(0, 0); render();
     },
     cancelarEdit: function () { S.edit = null; S.vista = S.volverEdit || 'alumnos'; render(); },
-    activo: function () { S.edit.activo = !S.edit.activo; A.guardarEdit(); },
+    // Dar de baja (o de alta) pregunta primero, y desde qué mes.
+    activo: function () { var E = S.edit; if (!E.nombre.trim()) { E.error = 'Falta el nombre.'; return render(); } E.error = null; E.pregunta = 'estado'; render(); verPregunta(); },
     guardarEdit: function () {
       var E = S.edit;
       if (!E.nombre.trim()) { E.error = 'Falta el nombre.'; return render(); }
-      E.guardando = true; E.error = null; render();
-      var envio = { id: E.id, nombre: E.nombre.trim(), grupo: E.grupo, cuota: E.cuota, telefono: E.telefono, desde: E.desde, notas: E.notas, activo: E.activo };
-      llamar('guardarAlumno', { a: envio }).then(function (guardado) {
-        var a = { id: guardado.id, nombre: String(guardado.nombre), grupo: guardado.grupo, cuota: Number(guardado.cuota) || 0,
-          telefono: String(guardado.telefono || ''), desde: String(guardado.desde || ''), activo: guardado.activo !== false, notas: String(guardado.notas || '') };
-        var i = D.alumnos.findIndex(function (x) { return x.id === a.id; });
-        if (i >= 0) D.alumnos[i] = a; else D.alumnos.push(a);
-        toast(E.id ? 'Guardado' : 'Alumno agregado');
-        S.edit = null; S.alumno = a.id; S.volver = 'alumnos'; S.vista = 'ficha'; render();
-        cargar(); // trae el historial de cuotas actualizado
-      }).catch(function (e) { E.guardando = false; E.error = 'No se guardó (' + e.message + ').'; render(); });
+      if (!E.grupo) { E.error = 'Elegí el grupo.'; return render(); }
+      var o = E.orig || {};
+      // Cuota en $0: no figura nunca como deudor. Se avisa una vez y se guarda con el segundo toque.
+      if (!E.cuota && (!E.id || o.cuota) && !E.cuotaCeroOk) {
+        E.cuotaCeroOk = true; E.error = 'La cuota está en $0: no va a figurar como deudor. Si es así, tocá Guardar de nuevo.'; return render();
+      }
+      if (E.id && (E.cuota !== o.cuota || E.grupo !== o.grupo)) { E.error = null; E.pregunta = 'cambio'; render(); return verPregunta(); }
+      enviarEdit(E, null, 'este');
     },
+    editDesde: function (d) {
+      var E = S.edit, activo = E.pregunta === 'estado' ? !E.activo : E.activo;
+      enviarEdit(E, activo, d.vale);
+    },
+    editNo: function () { S.edit.pregunta = null; render(); },
     conectar: function () {
-      var c = { url: document.getElementById('c-url').value.trim(), token: document.getElementById('c-token').value.trim() };
-      S.conn = c; // para que un error no borre lo que se escribió
+      var escrito = document.getElementById('c-token').value.trim();
+      // Clave vacía = la que ya estaba guardada (salvo que esa sea justo la que dejó de andar).
+      var c = { url: document.getElementById('c-url').value.trim(), token: escrito || (cfg && !S.claveMal ? cfg.token : '') };
+      S.conn = { url: c.url, tokenEscrito: escrito }; // para que un error no borre lo que se escribió
       if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(c.url)) { S.error = 'La dirección tiene que empezar con https://script.google.com y terminar en /exec.'; return render(); }
       if (!c.token) { S.error = 'Falta la clave.'; return render(); }
       S.cargando = true; S.error = null; render();
       var mes = mesDe(hoy());
+      // Lo que está en la cola se manda recién con la conexión nueva ya guardada (no se pierde).
       llamar('todo', { mes: mes }, c).then(function (d) {
-        cfg = c; guardarCfg(c); D = d; mesCargado = mes; S.ultima = new Date(); S.fecha = hoy(); S.vista = 'hoy'; guardarCache();
-      }).catch(function (e) { S.error = e.message; }).then(function () { S.cargando = false; render(); });
+        cfg = c; guardarCfg(c); D = d; mesCargado = mes; S.ultima = new Date(); S.fecha = hoy(); S.vista = 'hoy';
+        S.claveMal = false; S.conn = null; S.sinSenal = false; S.errorCola = null;
+        aplicarCola(); guardarCache(); cargar();
+      }).catch(function (e) { S.error = sinSenalReal(e) ? 'Sin señal: para conectar hace falta conexión.' : e.message; }).then(function () { S.cargando = false; render(); });
     }
   };
 
@@ -994,8 +1180,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   });
 
   // Recargar al volver a la app y cada 5 minutos si queda abierta (antes manda lo pendiente).
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && cfg && !S.cargando) cargar(); });
-  setInterval(function () { if (document.visibilityState === 'visible' && cfg && !S.cargando && !S.pago && !S.edit) cargar(); }, 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState !== 'visible') return; chequearDia(); render(); if (cfg && !S.cargando) cargar(); });
+  setInterval(function () { chequearDia(); if (document.visibilityState === 'visible' && cfg && !S.cargando && !S.pago && !S.edit) cargar(); }, 5 * 60 * 1000);
   // Lo guardado en el celular se reintenta al volver la señal y cada 30 segundos.
   window.addEventListener('online', function () { if (cfg) vaciarCola(); });
   setInterval(function () { if (cfg && cola.length) vaciarCola(); }, 30 * 1000);
@@ -1007,6 +1193,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   }
   render();
   if (cfg) cargar(mesDe(hoy()));
+  // Para que abra sin señal (ver sw.js). Solo en la dirección publicada, no abriendo el archivo a mano.
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(function () {});
 })();
 </script>
 </body>
