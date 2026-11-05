@@ -319,6 +319,15 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   }
   function horaNum(h) { var a = String(h).split(':').map(Number); return (a[0] || 0) * 60 + (a[1] || 0); }
   function pagado(aid, mes) { return D.pagos.filter(function (p) { return p.alumno === aid && p.mes === mes; }).reduce(function (s, p) { return s + p.monto; }, 0); }
+  // Los que vinieron a esta clase desde otro grupo (recuperan): tienen presente acá pero no son del grupo.
+  // También los que Héctor acaba de sumar y destildó (S.recup), para que no desaparezcan de la lista.
+  function recuperanEn(f, gid) {
+    var del = {}; alumnosDe(gid).forEach(function (a) { del[a.id] = true; });
+    var ids = [];
+    D.asistencias.forEach(function (x) { if (x.fecha === f && x.grupo === gid && !del[x.alumno] && ids.indexOf(x.alumno) < 0) ids.push(x.alumno); });
+    if (S.recup && S.recup.clave === f + '|' + gid) S.recup.ids.forEach(function (i) { if (!del[i] && ids.indexOf(i) < 0) ids.push(i); });
+    return ids.map(alumno).filter(Boolean).sort(porNombre);
+  }
   function presentesSet(f, gid) {
     var s = {};
     D.asistencias.forEach(function (x) { if (x.fecha === f && x.grupo === gid) s[x.alumno] = true; });
@@ -427,7 +436,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   // Pantalla de inicio: los grupos, sin plata (pedido de Héctor). Arriba las clases del día elegido.
   function tarjetaGrupo(g, f, deHoy) {
-    var al = alumnosDe(g.id), pr = presentesSet(f, g.id), n = al.filter(function (a) { return pr[a.id]; }).length;
+    var al = alumnosDe(g.id), pr = presentesSet(f, g.id), n = Object.keys(pr).length;
     return '<div class="clase" style="cursor:default;padding:0;overflow:hidden;align-items:stretch;gap:0">' +
       '<button data-a="lista" data-g="' + esc(g.id) + '" aria-label="Ver grupo ' + esc(g.nombre) + '" style="display:flex;align-items:center;flex-grow:1;min-width:0;background:none;border:0;padding:12px 8px 12px 16px;text-align:left;cursor:pointer">' +
       '<span class="txt"><b style="font-size:20px;font-weight:700">' + esc(g.hora) + ' · ' + esc(g.sede) + '</b>' +
@@ -493,8 +502,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   function vLista() {
     var g = grupo(S.grupo); if (!g) { S.vista = 'hoy'; return vHoy(); }
-    var f = S.fecha, mes = mesDe(f), al = alumnosDe(g.id), pr = presentesSet(f, g.id);
-    var n = al.filter(function (a) { return pr[a.id]; }).length;
+    var f = S.fecha, mes = mesDe(f), al = alumnosDe(g.id), pr = presentesSet(f, g.id), rec = recuperanEn(f, g.id);
+    var n = Object.keys(pr).length, nr = rec.filter(function (a) { return pr[a.id]; }).length;
     var px = otraClase(g, f, 1), sinProx = !px || px > hoy(), futuro = f > hoy();
     var h = '<header><button class="volver" data-a="ir" data-v="hoy">‹ Grupos</button>' +
       '<h1>' + esc(g.hora) + ' · ' + esc(g.sede) + '</h1>' +
@@ -503,7 +512,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<p class="sub" style="margin:0;font-weight:700;color:var(--ink)">' + (f === hoy() ? 'Hoy, ' : '') + esc(fechaLarga(f)) + '</p>' +
       (sinProx && px && !futuro ? '<p class="sub chico" style="margin:0">Próxima clase: ' + esc(fechaLarga(px)) + '</p>' : '') +
       (futuro ? '<p class="franja">Esta clase todavía no llegó: la lista se pasa ese día.</p>' : (f !== hoy() ? '<p class="franja">Estás viendo una clase pasada, no la de hoy.</p>' : '')) +
-      '<div class="fila"><p class="sub">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + '</p><p class="sub ok" style="font-weight:700">' + n + (n === 1 ? ' presente' : ' presentes') + '</p></div>' + sync() + '</header><main>' +
+      '<div class="fila"><p class="sub">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + '</p><p class="sub ok" style="font-weight:700">' + n + (n === 1 ? ' presente' : ' presentes') + (nr ? ' (' + nr + ' recupera' + (nr === 1 ? '' : 'n') + ')' : '') + '</p></div>' + sync() + '</header><main>' +
       // Arriba de la lista (pedido de Héctor): con grupos largos no hay que bajar hasta el final.
       '<div class="dos"><button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="verAsist" data-g="' + esc(g.id) + '" data-mes="' + mes + '">Ver asistencias</button>' +
       '<button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="grupoEditar" data-g="' + esc(g.id) + '">Editar grupo</button></div><ul class="lista">';
@@ -515,7 +524,34 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         (e.debe ? '<button class="chip debe cobrar" style="border:0;cursor:pointer;min-height:44px;padding:0 16px" data-a="cobrar" data-id="' + esc(a.id) + '" data-mes="' + mes + '">Cobrar ' + MESES[Number(mes.slice(5)) - 1] + '</button>' : '') +
         '<button class="tilde" data-a="toggle" data-id="' + esc(a.id) + '" aria-pressed="' + on + '"' + (futuro ? ' disabled style="opacity:.35;cursor:default"' : '') + ' aria-label="' + (on ? 'Quitar presente a ' : 'Marcar presente a ') + esc(a.nombre) + '">' + IC.tilde + '</button></li>';
     });
-    return h + '</ul><p class="sub chico">Cada toque se guarda solo. Si no hay señal, queda en el celular y se manda cuando vuelve.</p></main>';
+    h += '</ul>';
+    // Alumnos de otro grupo que vienen a recuperar: el presente queda en esta clase y esta fecha, sin cambiarlos de grupo.
+    if (rec.length) {
+      h += '<h2>Recuperan</h2><ul class="lista">';
+      rec.forEach(function (a) {
+        var on = !!pr[a.id], og = grupo(a.grupo);
+        h += '<li class="alumno conTilde"><button class="nom" data-a="ficha" data-id="' + esc(a.id) + '"><b>' + esc(a.nombre) + '</b><span class="muted chico">Recupera · es de ' + esc(og ? og.hora + ' · ' + og.sede : 'otro grupo') + '</span></button>' +
+          '<button class="tilde" data-a="toggle" data-id="' + esc(a.id) + '" aria-pressed="' + on + '"' + (futuro ? ' disabled style="opacity:.35;cursor:default"' : '') + ' aria-label="' + (on ? 'Quitar presente a ' : 'Marcar presente a ') + esc(a.nombre) + '">' + IC.tilde + '</button></li>';
+      });
+      h += '</ul>';
+    }
+    if (!futuro) {
+      if (S.recupAbierto) {
+        var q = S.buscar.trim().toLowerCase(), ya = {};
+        al.concat(rec).forEach(function (a) { ya[a.id] = true; });
+        var otros = D.alumnos.filter(function (a) { return a.activo && !ya[a.id] && (!q || a.nombre.toLowerCase().indexOf(q) >= 0); }).sort(porNombre);
+        h += '<section class="card"><h2>¿Quién viene a recuperar?</h2>' +
+          '<div class="campo"><label for="b-rec">Buscar alumno de otro grupo</label><input id="b-rec" type="search" data-campo="buscar" value="' + esc(S.buscar) + '" placeholder="Nombre"></div><ul class="lista">';
+        if (!otros.length) h += '<li class="vacio">' + (q ? 'No hay nadie con ese nombre en otros grupos.' : 'No hay alumnos en otros grupos.') + '</li>';
+        otros.slice(0, 30).forEach(function (a) {
+          var og = grupo(a.grupo);
+          h += '<li class="alumno" style="padding-right:14px"><button class="nom" data-a="recuperar" data-id="' + esc(a.id) + '"><b>' + esc(a.nombre) + '</b><span class="muted chico">' + esc(og ? og.hora + ' · ' + og.sede : '—') + '</span></button></li>';
+        });
+        if (otros.length > 30) h += '<li class="vacio">Escribí el nombre para ver más.</li>';
+        h += '</ul><button class="btn sec" data-a="recupCerrar">Cancelar</button></section>';
+      } else h += '<button class="btn sec" data-a="recupAbrir">+ Recupera alguien de otro grupo</button>';
+    }
+    return h + '<p class="sub chico">Cada toque se guarda solo. Si no hay señal, queda en el celular y se manda cuando vuelve.</p></main>';
   }
 
   function vCobro() {
@@ -597,7 +633,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function vFicha() {
     var a = alumno(S.alumno); if (!a) { S.vista = 'alumnos'; return vAlumnos(); }
     var g = grupo(a.grupo), mes = mesCargado || mesDe(hoy());
-    var fechas = D.asistencias.filter(function (x) { return x.alumno === a.id && mesDe(x.fecha) === mes; }).map(function (x) { return x.fecha; }).sort();
+    var suyo = valoresEn(a, mes).grupo;
+    var asis = D.asistencias.filter(function (x) { return x.alumno === a.id && mesDe(x.fecha) === mes; }).sort(function (x, y) { return x.fecha.localeCompare(y.fecha); });
+    var fechas = asis.map(function (x) { return x.fecha; });
+    // Si vino a otro grupo (recuperó), al lado de la fecha va a qué clase fue.
+    var etiq = asis.map(function (x) { var og = x.grupo !== suyo && grupo(x.grupo); return fechaCorta(x.fecha) + (og ? ' en ' + og.hora + ' · ' + og.sede : ''); });
     var pagos = D.pagos.filter(function (p) { return p.alumno === a.id; }).sort(function (x, y) { return y.fecha.localeCompare(x.fecha); }).slice(0, 8);
     var tel = a.telefono.replace(/\D/g, '');
     var h = '<header><button class="volver" data-a="atras">‹ Volver</button>' +
@@ -613,7 +653,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<div class="fila"><span>Grupo</span><b style="font-weight:600">' + esc(g ? g.nombre : '—') + '</b></div>' +
       '<div class="fila" style="font-size:18px;font-weight:700"><span>Paga por mes</span><span>' + (a.cuota ? plata(a.cuota) : '—') + '</span></div></section>' +
       '<section class="card"><div class="fila"><h2 class="sub" style="font-weight:600">Asistencia en ' + MESES[Number(mes.slice(5)) - 1] + '</h2><b>' + fechas.length + (fechas.length === 1 ? ' clase' : ' clases') + '</b></div>' +
-      (fechas.length ? '<div class="puntos">' + fechas.map(function (f) { return '<span>' + esc(fechaCorta(f)) + '</span>'; }).join('') + '</div>' : '<p class="muted chico" style="margin:0">Todavía no vino este mes.</p>') + '</section>' +
+      (fechas.length ? '<div class="puntos">' + etiq.map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>' : '<p class="muted chico" style="margin:0">Todavía no vino este mes.</p>') + '</section>' +
       '<section class="card"><h2 class="sub" style="font-weight:600">Pagos</h2>';
     if (!pagos.length) h += '<p class="muted chico" style="margin:0">No hay pagos registrados.</p>';
     pagos.forEach(function (p, k) {
@@ -717,12 +757,13 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var del = D.asistencias.filter(function (x) { return x.grupo === g.id && mesDe(x.fecha) === mes; });
     var fechas = []; del.forEach(function (x) { if (fechas.indexOf(x.fecha) < 0) fechas.push(x.fecha); }); fechas.sort();
     var por = {}; del.forEach(function (x) { (por[x.alumno] = por[x.alumno] || []).push(x.fecha); });
-    // Los que estaban en el grupo ese mes, más cualquiera que vino aunque ahora figure en otro lado.
-    var lista = D.alumnos.filter(function (a) { var v = valoresEn(a, mes); return (v.activo && v.grupo === g.id) || por[a.id]; });
+    // Los que estaban en el grupo ese mes. Los que vinieron siendo de otro grupo (recuperan) van aparte.
+    var lista = D.alumnos.filter(function (a) { var v = valoresEn(a, mes); return v.activo && v.grupo === g.id; });
     lista.sort(function (a, b) { return ((por[b.id] || []).length - (por[a.id] || []).length) || porNombre(a, b); });
+    var otrosVin = D.alumnos.filter(function (a) { return por[a.id] && lista.indexOf(a) < 0; }).sort(porNombre);
     // Los que estuvieron en el grupo antes y ese mes ya no.
     var ex = D.alumnos.filter(function (a) {
-      if (lista.indexOf(a) >= 0) return false;
+      if (lista.indexOf(a) >= 0 || otrosVin.indexOf(a) >= 0) return false;
       var estuvo = (D.historial || []).some(function (h) { return h.alumno === a.id && h.grupo === g.id && h.desde <= mes; });
       if (!(D.historial || []).some(function (h) { return h.alumno === a.id; })) estuvo = a.grupo === g.id && !a.activo;
       return estuvo;
@@ -740,6 +781,16 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         (n ? '<span class="muted chico">' + fs.map(fechaCorta).join(' · ') + '</span>' : '') + '</button></li>';
     });
     h += '</ul></section>';
+    if (otrosVin.length) {
+      h += '<section style="display:flex;flex-direction:column;gap:8px"><h2>Vinieron de otros grupos</h2><ul class="lista">';
+      otrosVin.forEach(function (a) {
+        var fs = por[a.id].slice().sort(), v = valoresEn(a, mes), og = v.activo && grupo(v.grupo);
+        h += '<li class="alumno" style="padding-right:14px"><button class="nom" data-a="ficha" data-id="' + esc(a.id) + '"><b>' + esc(a.nombre) + '</b>' +
+          '<span class="muted chico">' + (og ? 'Es de ' + esc(og.hora + ' · ' + og.sede) : 'Ya no está en este grupo') + '</span>' +
+          '<span class="muted chico">' + fs.map(fechaCorta).join(' · ') + '</span></button></li>';
+      });
+      h += '</ul></section>';
+    }
     if (ex.length) {
       h += '<section style="display:flex;flex-direction:column;gap:8px"><h2>Ya no están</h2><ul class="lista">';
       ex.forEach(function (a) {
@@ -800,7 +851,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 8;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 9;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
@@ -832,6 +883,9 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       demo: '<div class="btn sec" style="min-height:44px;font-size:16px">Ver asistencias</div>' +
         '<div class="alumno" style="padding-right:14px"><span class="nom"><b>Maria Pia</b><span class="estado ok">Vino a 3 de 4 clases</span><span class="muted chico">2/11 · 4/11 · 6/11</span></span></div>' +
         '<div class="alumno" style="padding-right:14px"><span class="nom"><b>Gustavo</b><span class="estado mal">No vino este mes</span></span></div>' },
+    { v: 9, t: 'Alguien viene a recuperar', p: 'Si un alumno faltó a su clase y viene a otra, entrá a la clase a la que vino y tocá "+ Recupera alguien de otro grupo" (abajo de la lista). Buscalo por el nombre y tocalo: aparece en "Recuperan" con el presente puesto. Queda anotado que vino ese día a esa clase; no lo cambia de grupo ni toca lo que paga.',
+      demo: '<div class="btn sec" style="font-size:16px">+ Recupera alguien de otro grupo</div>' +
+        '<div class="alumno"><span class="nom"><b>Gustavo</b><span class="muted chico">Recupera · es de 9:00 · Bonzi</span></span><span class="tilde" aria-pressed="true">' + IC.tilde + '</span></div>' },
     { v: 3, t: 'Clases nuevas y horarios', p: 'Todo lo de los grupos está en Grupos (abajo a la izquierda). Tocá un grupo para verlo y pasar lista, o el lápiz al costado para cambiarle los días o la hora, o cerrarlo. Para abrir una clase nueva, tocá "+ Nueva clase" arriba de todo.',
       demo: '<div class="btn" style="font-size:15px">+ Nueva clase</div>' + demoClase.replace('chip fuerte">Pasar lista', 'chip">Ver grupo') },
     { v: 5, t: 'La clase anterior', p: 'Adentro de un grupo, arriba, tocá "‹ Anterior" para ir a la clase anterior de ese grupo y ver quién vino (o corregirlo). "Próxima ›" te vuelve hacia hoy. Si está gris, es que la próxima clase todavía no llegó: abajo dice qué día es. Las flechas saltan solo a los días del grupo; si no te lleva al día que buscás, revisá los días con el lápiz del grupo.',
@@ -895,6 +949,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     if (v !== 'ficha' && v !== 'editar') S.borrarId = null;
     if (v === 'cobro') S.pago = null;
     if (v === 'alumnos' || v === 'cobro') S.buscar = '';
+    if (S.recupAbierto) { S.recupAbierto = false; S.buscar = ''; }
     S.vista = v;
     window.scrollTo(0, 0);
     render();
@@ -1019,7 +1074,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       var g = grupo(S.grupo); if (!g) return;
       var f = otraClase(g, S.fecha, Number(d.n));
       if (!f || (Number(d.n) > 0 && f > hoy())) return;
-      S.fecha = f; render(); asegurarMes();
+      S.fecha = f; S.recupAbierto = false; S.buscar = ''; render(); asegurarMes();
     },
     verAsist: function (d) { S.asistGrupo = d.g; S.volverAsist = S.vista; if (d.mes) S.mesPanel = d.mes; ir('asist'); },
     mesPanel: function (d) { S.mesPanel = sumarMes(S.mesPanel, Number(d.n)); render(); asegurarMes(); },
@@ -1117,6 +1172,20 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       var datos = { fecha: f, grupo: g, alumno: aid, on: on };
       aplicarPresente(datos, on); guardarCache(); render();
       encolar('presente', datos);
+    },
+    recupAbrir: function () { S.recupAbierto = true; S.buscar = ''; render(); var el = document.getElementById('b-rec'); if (el) el.focus(); },
+    recupCerrar: function () { S.recupAbierto = false; S.buscar = ''; render(); },
+    recuperar: function (d) {
+      if (S.fecha > hoy()) return;
+      var f = S.fecha, g = S.grupo, clave = f + '|' + g;
+      if (!S.recup || S.recup.clave !== clave) S.recup = { clave: clave, ids: [] };
+      if (S.recup.ids.indexOf(d.id) < 0) S.recup.ids.push(d.id);
+      S.recupAbierto = false; S.buscar = '';
+      if (!D.asistencias.some(function (x) { return x.fecha === f && x.grupo === g && x.alumno === d.id; })) {
+        var datos = { fecha: f, grupo: g, alumno: d.id, on: true };
+        aplicarPresente(datos, true); guardarCache(); encolar('presente', datos);
+      }
+      render();
     },
     filtro: function (d) { S.filtroGrupo = d.g; render(); },
     bajas: function (d) { S.verBajas = d.b === '1'; render(); },
