@@ -74,6 +74,10 @@ textarea { min-height: 80px; resize: vertical; }
 .dianav button { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font-size: 20px; font-weight: 700; cursor: pointer; color: var(--verde-texto); }
 .puntos { display: flex; flex-wrap: wrap; gap: 6px; }
 .puntos span { font-size: 13px; font-weight: 600; padding: 4px 8px; border-radius: 8px; background: var(--pastel-suave); color: var(--verde-oscuro); }
+.puntos button { font: inherit; font-size: 16px; font-weight: 700; min-height: 44px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--pastel-suave); color: var(--verde-oscuro); cursor: pointer; }
+.pres-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.pres-lista li { font-size: 20px; font-weight: 600; padding: 10px 4px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.pres-lista li:last-child { border-bottom: 0; }
 .err { color: var(--debe); font-size: 15px; font-weight: 600; margin: 0; }
 .vacio { text-align: center; color: var(--muted); padding: 24px 8px; margin: 0; }
 nav.barra { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 6px 4px calc(10px + env(safe-area-inset-bottom)); }
@@ -328,6 +332,12 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     if (S.recup && S.recup.clave === f + '|' + gid) S.recup.ids.forEach(function (i) { if (!del[i] && ids.indexOf(i) < 0) ids.push(i); });
     return ids.map(alumno).filter(Boolean).sort(porNombre);
   }
+  // Promedio de presentes por clase (clases = fechas con algún presente). "6,5"; sin clases, null.
+  function promedio(presentes, clases) {
+    if (!clases) return null;
+    var x = Math.round(presentes / clases * 10) / 10;
+    return String(x).replace('.', ',');
+  }
   function presentesSet(f, gid) {
     var s = {};
     D.asistencias.forEach(function (x) { if (x.fecha === f && x.grupo === gid) s[x.alumno] = true; });
@@ -525,6 +535,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         sinClase ? '<p class="franja">Este grupo no tiene clase ' + (f === hoy() ? 'hoy (' + esc(nomDia) + ')' : 'el ' + esc(nomDia) + ' ' + esc(fechaCorta(f))) + ', así que no se puede pasar lista. ¿Tocaste el grupo que querías? Para ver su última clase, tocá "‹ Anterior".</p>' :
         (f !== hoy() ? '<p class="franja">Estás viendo una clase pasada, no la de hoy.</p>' : '')) +
       '<div class="fila"><p class="sub">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + '</p><p class="sub ok" style="font-weight:700">' + n + (n === 1 ? ' presente' : ' presentes') + (nr ? ' (' + nr + ' recupera' + (nr === 1 ? '' : 'n') + ')' : '') + '</p></div>' + sync() + '</header><main>' +
+      // Pedido de Héctor (5/11): ver de un vistazo solo los nombres de los que vinieron.
+      (futuro ? '' : '<button class="btn sec" style="min-height:48px;font-size:16px;padding:0 8px" data-a="verPresentes" data-g="' + esc(g.id) + '" data-f="' + f + '">' + (f === hoy() ? 'Presentes hoy' : 'Presentes del ' + esc(fechaCorta(f))) + ' (' + n + ')</button>') +
       // Arriba de la lista (pedido de Héctor): con grupos largos no hay que bajar hasta el final.
       '<div class="dos"><button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="verAsist" data-g="' + esc(g.id) + '" data-mes="' + mes + '">Ver asistencias</button>' +
       '<button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="grupoEditar" data-g="' + esc(g.id) + '">Editar grupo</button></div><ul class="lista">';
@@ -741,13 +753,14 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<button class="btn sec" data-a="verDeben">' + (r.deben.length ? 'Ver quién debe ' + MESES[Number(mes.slice(5)) - 1] + ' (' + r.deben.length + ')' : 'Pagaron todos') + '</button></section>' +
       '<section style="display:flex;flex-direction:column;gap:10px"><h2>Por grupo</h2>';
     r.grupos.sort(function (a, b) { return porHora(a.g, b.g); }).forEach(function (x) {
-      var clases = D.asistencias.filter(function (y) { return y.grupo === x.g.id && mesDe(y.fecha) === mes; }).length;
+      var delG = D.asistencias.filter(function (y) { return y.grupo === x.g.id && mesDe(y.fecha) === mes; }), clases = delG.length;
+      var nf = {}; delG.forEach(function (y) { nf[y.fecha] = true; }); nf = Object.keys(nf).length;
       // Un grupo cerrado se muestra solo en los meses en que tuvo algo.
       if (x.g.activo === false && !x.alumnos && !x.cobrado && !clases) return;
       h += '<div class="card"><div class="fila"><b style="font-size:17px;font-weight:600">' + esc(x.g.nombre) + (x.g.activo === false ? ' <span class="muted chico">(cerrado)</span>' : '') + '</b><span class="muted chico">' + x.alumnos + (x.alumnos === 1 ? ' alumno' : ' alumnos') + '</span></div>' +
         '<div class="pista" style="height:8px"><div style="width:' + pct(x.cobrado, x.esperado) + '%"></div></div>' +
         '<div class="fila chico"><span class="ok" style="font-weight:600">' + plata(x.cobrado) + ' cobrado</span><span class="muted">de ' + plata(x.esperado) + '</span></div>' +
-        '<div class="muted chico">' + clases + (clases === 1 ? ' presente' : ' presentes') + ' en el mes</div>' +
+        '<div class="muted chico">' + (nf ? nf + (nf === 1 ? ' clase' : ' clases') + ' · promedio ' + promedio(clases, nf) + ' por clase' : 'Sin clases con lista este mes') + '</div>' +
         '<button class="btn sec" style="min-height:48px;font-size:16px" data-a="verAsist" data-g="' + esc(x.g.id) + '">Ver asistencias</button></div>';
     });
     h += '</section>' +
@@ -782,8 +795,12 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     }).sort(porNombre);
     h += '<section class="card"><div class="tres"><div><div style="font-size:22px;font-weight:700">' + fechas.length + '</div><div class="muted chico">' + (fechas.length === 1 ? 'clase con lista' : 'clases con lista') + '</div></div>' +
       '<div><div style="font-size:22px;font-weight:700">' + lista.length + '</div><div class="muted chico">alumnos</div></div>' +
-      '<div><div style="font-size:22px;font-weight:700" class="ok">' + del.length + '</div><div class="muted chico">presentes</div></div></div>' +
-      (fechas.length ? '<div class="puntos">' + fechas.map(function (f) { return '<span>' + esc(fechaCorta(f)) + '</span>'; }).join('') + '</div>' : '') + '</section>';
+      // Promedio por clase en vez de la suma del mes (Héctor, 5/11: "13 presentes" no le decía nada).
+      '<div><div style="font-size:22px;font-weight:700" class="ok">' + (promedio(del.length, fechas.length) || '–') + '</div><div class="muted chico">promedio por clase</div></div></div>' +
+      (fechas.length ? '<p class="muted chico" style="margin:0">Tocá una fecha para ver los nombres:</p><div class="puntos">' + fechas.map(function (f) {
+        var c = del.filter(function (x) { return x.fecha === f; }).length;
+        return '<button data-a="verPresentes" data-g="' + esc(g.id) + '" data-f="' + f + '" aria-label="Presentes del ' + esc(fechaLarga(f)) + '">' + esc(fechaCorta(f)) + ' · ' + (c === 1 ? 'vino 1' : 'vinieron ' + c) + '</button>';
+      }).join('') + '</div>' : '') + '</section>';
     h += '<section style="display:flex;flex-direction:column;gap:8px"><h2>Quién vino</h2><ul class="lista">';
     if (!lista.length) h += '<li class="vacio">No hay alumnos en este grupo ese mes.</li>';
     lista.forEach(function (a) {
@@ -859,11 +876,31 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     return h;
   }
 
+  // ---------- Presentes de una clase (cuadrito) ----------
+  // Un solo cuadro, desde "Presentes hoy" adentro del grupo y desde las fechas de "Ver asistencias".
+  function vPresentes() {
+    var g = grupo(S.presDia.g), f = S.presDia.f; if (!g) { S.presDia = null; return ''; }
+    var mes = mesDe(f), vistos = {}, ls = [];
+    D.asistencias.forEach(function (x) {
+      if (x.fecha !== f || x.grupo !== g.id || vistos[x.alumno]) return;
+      vistos[x.alumno] = true; var a = alumno(x.alumno); if (a) ls.push(a);
+    });
+    ls.sort(porNombre);
+    var tit = f === hoy() ? 'Presentes hoy' : 'Presentes del ' + fechaLarga(f).toLowerCase();
+    return '<div class="tuto-fondo"><div class="tuto" role="dialog" aria-modal="true" aria-labelledby="pres-t">' +
+      '<h2 id="pres-t">' + esc(tit) + '</h2><p class="muted" style="font-size:17px">' + esc(g.hora + ' · ' + g.sede) + ' · ' + ls.length + (ls.length === 1 ? ' presente' : ' presentes') + '</p>' +
+      (ls.length ? '<ul class="pres-lista">' + ls.map(function (a) {
+        var v = valoresEn(a, mes), de = !(v.activo && v.grupo === g.id);
+        return '<li>' + esc(a.nombre) + (de ? ' <span class="muted chico" style="font-weight:400">(recupera)</span>' : '') + '</li>';
+      }).join('') + '</ul>' : '<p class="muted">Todavía no hay nadie con presente en esta clase.</p>') +
+      '<button class="btn" id="pres-volver" data-a="presCerrar">Volver</button></div></div>';
+  }
+
   // ---------- Tutorial ----------
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 10;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 11;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
@@ -898,6 +935,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     { v: 9, t: 'Alguien viene a recuperar', p: 'Si un alumno faltó a su clase y viene a otra, entrá a la clase a la que vino y tocá "+ Recupera alguien de otro grupo" (abajo de la lista). Buscalo por el nombre y tocalo: aparece en "Recuperan" con el presente puesto. Queda anotado que vino ese día a esa clase; no lo cambia de grupo ni toca lo que paga.',
       demo: '<div class="btn sec" style="font-size:16px">+ Recupera alguien de otro grupo</div>' +
         '<div class="alumno"><span class="nom"><b>Gustavo</b><span class="muted chico">Recupera · es de 9:00 · Bonzi</span></span><span class="tilde" aria-pressed="true">' + IC.tilde + '</span></div>' },
+    { v: 11, t: 'Quién vino hoy', p: 'Adentro de un grupo, tocá "Presentes hoy" (arriba de la lista) y te muestra solo los nombres de los que vinieron. Tocá "Volver" para seguir pasando lista. En una clase pasada el botón dice la fecha. En "Ver asistencias" también podés tocar cada fecha para ver quién vino ese día, y arriba ves el promedio de presentes por clase.',
+      demo: '<div class="btn sec" style="min-height:48px;font-size:16px">Presentes hoy (5)</div><ul class="pres-lista"><li>Beatriz</li><li>Julio</li><li>Marta</li></ul>' },
     { v: 3, t: 'Clases nuevas y horarios', p: 'Todo lo de los grupos está en Grupos (abajo a la izquierda). Tocá un grupo para verlo y pasar lista, o el lápiz al costado para cambiarle los días o la hora, o cerrarlo. Para abrir una clase nueva, tocá "+ Nueva clase" arriba de todo.',
       demo: '<div class="btn" style="font-size:15px">+ Nueva clase</div>' + demoClase.replace('chip fuerte">Pasar lista', 'chip">Ver grupo') },
     { v: 10, t: 'La clase anterior', p: 'Adentro de un grupo, tocá "‹ Anterior" para ir a la clase anterior. Si te olvidaste de pasar lista o de sumar a alguien que vino a recuperar, hacelo ahí: queda con la fecha de ese día. "Próxima ›" te vuelve hacia hoy; si está gris, la próxima clase todavía no llegó (abajo dice qué día es) y no se puede tildar antes. Las flechas saltan solo a los días del grupo; si no te lleva al día que buscás, revisá los días con el lápiz del grupo.',
@@ -943,6 +982,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         }
       }
       h = ({ hoy: vHoy, lista: vLista, cobro: vCobro, alumnos: vAlumnos, ficha: vFicha, editar: vEditar, panel: vPanel, grupos: vHoy, grupoEdit: vGrupoEdit, grupoCerrar: vGrupoCerrar, asist: vAsist })[S.vista]() + barra();
+      if (S.presDia && S.tuto == null) { h += vPresentes(); foco = 'pres-volver'; pos = null; }
       if (S.tuto != null) { h += vTutorial(); foco = 'tuto-sig'; pos = null; }
     }
     app.innerHTML = h;
@@ -964,6 +1004,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     if (v === 'cobro') S.pago = null;
     if (v === 'alumnos' || v === 'cobro') S.buscar = '';
     if (S.recupAbierto) { S.recupAbierto = false; S.buscar = ''; }
+    S.presDia = null;
     S.vista = v;
     window.scrollTo(0, 0);
     render();
@@ -1090,6 +1131,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       if (!f || (Number(d.n) > 0 && f > hoy())) return;
       S.fecha = f; S.recupAbierto = false; S.buscar = ''; render(); asegurarMes();
     },
+    verPresentes: function (d) { S.presDia = { g: d.g, f: d.f }; render(); },
+    presCerrar: function () { S.presDia = null; render(); },
     verAsist: function (d) { S.asistGrupo = d.g; S.volverAsist = S.vista; if (d.mes) S.mesPanel = d.mes; ir('asist'); },
     mesPanel: function (d) { S.mesPanel = sumarMes(S.mesPanel, Number(d.n)); render(); asegurarMes(); },
     lista: function (d) { S.grupo = d.g; ir('lista'); },
