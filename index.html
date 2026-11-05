@@ -490,28 +490,40 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     return '<section class="card"><b style="font-size:20px">' + esc(t) + '</b>' + (prox ? '<span class="sub" style="margin:0">' + esc(prox) + '</span>' : '') + '</section>';
   }
 
+  // ¿El grupo tiene clase ese día, según sus días?
+  function tieneClase(g, f) {
+    return g.dias.split(',').map(function (x) { return x.trim().toUpperCase(); }).indexOf(DIAS[deIso(f).getDay()]) >= 0;
+  }
   // Clase siguiente (n=1) o anterior (n=-1) del grupo según sus días; null si no hay en 14 días
   function otraClase(g, f, n) {
-    var dias = g.dias.split(',').map(function (x) { return x.trim(); });
     for (var k = 0; k < 14; k++) {
       f = sumarDias(f, n);
-      if (dias.indexOf(DIAS[deIso(f).getDay()]) >= 0) return f;
+      if (tieneClase(g, f)) return f;
     }
     return null;
   }
+  // Se puede tildar si la clase ya llegó y el grupo tiene clase ese día. Un día sin clase solo deja quitar
+  // un presente que ya estaba (para poder corregir), nunca poner uno nuevo.
+  function sePuedeTildar(g, f, on) { return f <= hoy() && (tieneClase(g, f) || !on); }
 
   function vLista() {
     var g = grupo(S.grupo); if (!g) { S.vista = 'hoy'; return vHoy(); }
     var f = S.fecha, mes = mesDe(f), al = alumnosDe(g.id), pr = presentesSet(f, g.id), rec = recuperanEn(f, g.id);
     var n = Object.keys(pr).length, nr = rec.filter(function (a) { return pr[a.id]; }).length;
     var px = otraClase(g, f, 1), sinProx = !px || px > hoy(), futuro = f > hoy();
+    // Día sin clase de este grupo (pasa si se abre desde "los demás grupos"): no se tilda, así no quedan
+    // presentes en un día que no hubo clase.
+    var sinClase = !futuro && !tieneClase(g, f), bloq = futuro || sinClase;
+    var nomDia = NOMBRE_DIA[deIso(f).getDay()].toLowerCase();
     var h = '<header><button class="volver" data-a="ir" data-v="hoy">‹ Grupos</button>' +
       '<h1>' + esc(g.hora) + ' · ' + esc(g.sede) + '</h1>' +
       '<div class="fila" style="gap:8px"><button class="btn sec" style="min-height:44px;flex:1;font-size:15px;padding:0 8px" data-a="claseOtra" data-n="-1">‹ Anterior</button>' +
       '<button class="btn sec" style="min-height:44px;flex:1;font-size:15px;padding:0 8px" data-a="claseOtra" data-n="1"' + (sinProx ? ' disabled' : '') + '>Próxima ›</button></div>' +
       '<p class="sub" style="margin:0;font-weight:700;color:var(--ink)">' + (f === hoy() ? 'Hoy, ' : '') + esc(fechaLarga(f)) + '</p>' +
       (sinProx && px && !futuro ? '<p class="sub chico" style="margin:0">Próxima clase: ' + esc(fechaLarga(px)) + '</p>' : '') +
-      (futuro ? '<p class="franja">Esta clase todavía no llegó: la lista se pasa ese día.</p>' : (f !== hoy() ? '<p class="franja">Estás viendo una clase pasada, no la de hoy.</p>' : '')) +
+      (futuro ? '<p class="franja">Esta clase todavía no llegó: la lista se pasa ese día.</p>' :
+        sinClase ? '<p class="franja">Este grupo no tiene clase ' + (f === hoy() ? 'hoy (' + esc(nomDia) + ')' : 'el ' + esc(nomDia) + ' ' + esc(fechaCorta(f))) + ', así que no se puede pasar lista. ¿Tocaste el grupo que querías? Para ver su última clase, tocá "‹ Anterior".</p>' :
+        (f !== hoy() ? '<p class="franja">Estás viendo una clase pasada, no la de hoy.</p>' : '')) +
       '<div class="fila"><p class="sub">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + '</p><p class="sub ok" style="font-weight:700">' + n + (n === 1 ? ' presente' : ' presentes') + (nr ? ' (' + nr + ' recupera' + (nr === 1 ? '' : 'n') + ')' : '') + '</p></div>' + sync() + '</header><main>' +
       // Arriba de la lista (pedido de Héctor): con grupos largos no hay que bajar hasta el final.
       '<div class="dos"><button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="verAsist" data-g="' + esc(g.id) + '" data-mes="' + mes + '">Ver asistencias</button>' +
@@ -522,7 +534,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       h += '<li class="alumno conTilde"><button class="nom" data-a="ficha" data-id="' + esc(a.id) + '"><b>' + esc(a.nombre) + '</b><span class="estado ' + e.cls + '">' + esc(e.txt) + '</span></button>' +
         // Cobra el mes de la clase que se está mirando (si es una clase de octubre, cobra octubre).
         (e.debe ? '<button class="chip debe cobrar" style="border:0;cursor:pointer;min-height:44px;padding:0 16px" data-a="cobrar" data-id="' + esc(a.id) + '" data-mes="' + mes + '">Cobrar ' + MESES[Number(mes.slice(5)) - 1] + '</button>' : '') +
-        '<button class="tilde" data-a="toggle" data-id="' + esc(a.id) + '" aria-pressed="' + on + '"' + (futuro ? ' disabled style="opacity:.35;cursor:default"' : '') + ' aria-label="' + (on ? 'Quitar presente a ' : 'Marcar presente a ') + esc(a.nombre) + '">' + IC.tilde + '</button></li>';
+        '<button class="tilde" data-a="toggle" data-id="' + esc(a.id) + '" aria-pressed="' + on + '"' + (futuro || (sinClase && !on) ? ' disabled style="opacity:.35;cursor:default"' : '') + ' aria-label="' + (on ? 'Quitar presente a ' : 'Marcar presente a ') + esc(a.nombre) + '">' + IC.tilde + '</button></li>';
     });
     h += '</ul>';
     // Alumnos de otro grupo que vienen a recuperar: el presente queda en esta clase y esta fecha, sin cambiarlos de grupo.
@@ -531,11 +543,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       rec.forEach(function (a) {
         var on = !!pr[a.id], og = grupo(a.grupo);
         h += '<li class="alumno conTilde"><button class="nom" data-a="ficha" data-id="' + esc(a.id) + '"><b>' + esc(a.nombre) + '</b><span class="muted chico">Recupera · es de ' + esc(og ? og.hora + ' · ' + og.sede : 'otro grupo') + '</span></button>' +
-          '<button class="tilde" data-a="toggle" data-id="' + esc(a.id) + '" aria-pressed="' + on + '"' + (futuro ? ' disabled style="opacity:.35;cursor:default"' : '') + ' aria-label="' + (on ? 'Quitar presente a ' : 'Marcar presente a ') + esc(a.nombre) + '">' + IC.tilde + '</button></li>';
+          '<button class="tilde" data-a="toggle" data-id="' + esc(a.id) + '" aria-pressed="' + on + '"' + (futuro || (sinClase && !on) ? ' disabled style="opacity:.35;cursor:default"' : '') + ' aria-label="' + (on ? 'Quitar presente a ' : 'Marcar presente a ') + esc(a.nombre) + '">' + IC.tilde + '</button></li>';
       });
       h += '</ul>';
     }
-    if (!futuro) {
+    if (!bloq) {
       if (S.recupAbierto) {
         var q = S.buscar.trim().toLowerCase(), ya = {};
         al.concat(rec).forEach(function (a) { ya[a.id] = true; });
@@ -851,7 +863,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 9;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 10;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
@@ -895,6 +907,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         '<div class="alumno"><span class="nom"><b>Gustavo</b><span class="estado mal">Debe octubre · $55.000</span></span></div>' },
     { v: 6, t: 'Cambios a mitad de mes', p: 'Cuando le cambiás la cuota o el grupo a alguien, o lo das de baja, la app te pregunta desde qué mes vale. Si ya te pagó este mes con la cuota de antes, o si te debe este mes y se va, elegí el mes que viene.',
       demo: '<div class="opcion" style="text-align:left;padding:10px 14px">Desde este mes</div><div class="opcion" style="text-align:left;padding:10px 14px">Desde el mes que viene</div>' },
+    { v: 10, t: 'Grupos que hoy no tienen clase', p: 'Si entrás a un grupo que hoy no tiene clase (de los de abajo en Grupos), ves su lista pero no podés marcar presentes: arriba aparece un aviso en naranja. Así no quedan presentes en un día sin clase. Si querías otro grupo, volvé con "‹ Grupos". Para ver su última clase, tocá "‹ Anterior".',
+      demo: '<p class="franja">Este grupo no tiene clase hoy (lunes), así que no se puede pasar lista.</p>' },
     { t: 'Listo', p: 'Si te perdés, tocá "Ayuda" arriba en Grupos y vuelve este tutorial. Y si algo no anda, avisale a Ariel.',
       demo: '' }
   ];
@@ -1166,9 +1180,9 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       });
     },
     toggle: function (d) {
-      if (S.fecha > hoy()) return; // la clase todavía no llegó
-      var f = S.fecha, g = S.grupo, aid = d.id;
+      var f = S.fecha, g = S.grupo, aid = d.id, gr = grupo(g);
       var on = !D.asistencias.some(function (x) { return x.fecha === f && x.grupo === g && x.alumno === aid; });
+      if (!gr || !sePuedeTildar(gr, f, on)) return; // la clase todavía no llegó, o ese día el grupo no tiene clase
       var datos = { fecha: f, grupo: g, alumno: aid, on: on };
       aplicarPresente(datos, on); guardarCache(); render();
       encolar('presente', datos);
@@ -1176,7 +1190,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     recupAbrir: function () { S.recupAbierto = true; S.buscar = ''; render(); var el = document.getElementById('b-rec'); if (el) el.focus(); },
     recupCerrar: function () { S.recupAbierto = false; S.buscar = ''; render(); },
     recuperar: function (d) {
-      if (S.fecha > hoy()) return;
+      var gr = grupo(S.grupo);
+      if (!gr || !sePuedeTildar(gr, S.fecha, true)) return;
       var f = S.fecha, g = S.grupo, clave = f + '|' + g;
       if (!S.recup || S.recup.clave !== clave) S.recup = { clave: clave, ids: [] };
       if (S.recup.ids.indexOf(d.id) < 0) S.recup.ids.push(d.id);
