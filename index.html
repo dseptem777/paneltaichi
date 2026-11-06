@@ -36,7 +36,7 @@ main { padding: 6px 20px 20px; display: flex; flex-direction: column; gap: 16px;
 .pista { height: 10px; background: var(--pista); border-radius: 5px; overflow: hidden; }
 .pista > div { height: 100%; background: var(--pastel); border-radius: 5px; }
 .volver { background: none; border: 0; padding: 0; min-height: 44px; display: flex; align-items: center; font-size: 16px; font-weight: 600; color: var(--verde-texto); cursor: pointer; align-self: flex-start; }
-.btn { min-height: 52px; border-radius: 14px; border: 2px solid var(--pastel-borde); background: var(--pastel); color: var(--verde-oscuro); font-size: 17px; font-weight: 700; cursor: pointer; padding: 0 16px; display: flex; align-items: center; justify-content: center; text-decoration: none; }
+.btn { min-height: 52px; border-radius: 14px; border: 2px solid var(--pastel-borde); background: var(--pastel); color: var(--verde-oscuro); font-size: 17px; font-weight: 700; cursor: pointer; padding: 0 16px; display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; }
 .btn.sec { background: var(--card); color: var(--verde-texto); }
 .btn:disabled { opacity: .6; cursor: default; }
 .clase { display: flex; align-items: center; gap: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; min-height: 72px; text-align: left; width: 100%; cursor: pointer; }
@@ -78,6 +78,14 @@ textarea { min-height: 80px; resize: vertical; }
 .pres-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .pres-lista li { font-size: 20px; font-weight: 600; padding: 10px 4px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .pres-lista li:last-child { border-bottom: 0; }
+.parte-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.parte-lista li, .parte-tot div { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 17px; line-height: 1.3; }
+.parte-lista li, .parte-tot div { flex-wrap: wrap; column-gap: 10px; row-gap: 0; }
+.parte-lista li span { flex: 1 1 0; min-width: min-content; overflow-wrap: break-word; }
+.parte-lista b, .parte-tot b { white-space: nowrap; margin-left: auto; }
+.parte-tot { display: flex; flex-direction: column; border-top: 2px solid var(--verde-texto); }
+.parte-tot div { font-weight: 700; flex-wrap: wrap; }
+.parte-tot .parte-va { border-bottom: 0; font-size: 20px; color: var(--verde-texto); }
 .err { color: var(--debe); font-size: 15px; font-weight: 600; margin: 0; }
 .vacio { text-align: center; color: var(--muted); padding: 24px 8px; margin: 0; }
 nav.barra { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 6px 4px calc(10px + env(safe-area-inset-bottom)); }
@@ -197,7 +205,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     volver: 'hoy'
   };
 
-  function mesActivo() { return (S.vista === 'panel' || S.vista === 'asist') ? S.mesPanel : mesDe(S.fecha); }
+  function mesActivo() { return (S.vista === 'panel' || S.vista === 'asist' || S.vista === 'parte') ? S.mesPanel : mesDe(S.fecha); }
 
   // ---------- Sin conexión ----------
   // Presentes y cobros nuevos van primero a una cola guardada en el celular y se mandan
@@ -387,6 +395,25 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       grupos: Object.keys(grupos).map(function (k) { return grupos[k]; }) };
   }
   function pct(a, b) { return b > 0 ? Math.min(100, Math.round(a * 100 / b)) : 0; }
+  // Lugares: "bonzi", "Bonzi " o "Bonzí" son el mismo.
+  function normSede(x) { return String(x || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' '); }
+  // Parte que se le paga a un lugar (pestaña Sedes). Si D.sedes no vino, el Apps Script es viejo.
+  function hayPartes() { return Array.isArray(D.sedes); }
+  function parteDe(sede) { return (D.sedes || []).find(function (x) { return normSede(x.sede) === normSede(sede); }) || null; }
+  function txtPct(n) { return String(n).replace('.', ',') + '%'; }
+  // Lo cobrado de las cuotas de un mes en un lugar (mismo cálculo que el Panel por grupo), alumno por alumno.
+  function resumenParte(sede, mes) {
+    var gids = {}, filas = [], total = 0;
+    D.grupos.forEach(function (g) { if (normSede(g.sede) === normSede(sede)) gids[g.id] = g; });
+    D.alumnos.forEach(function (a) {
+      var v = valoresEn(a, mes); if (!gids[v.grupo]) return;
+      var p = pagado(a.id, mes); if (p <= 0) return;
+      filas.push({ a: a, monto: p }); total += p;
+    });
+    filas.sort(function (x, y) { return porNombre(x.a, y.a); });
+    var pa = parteDe(sede) || { porcentaje: 0, para: '' };
+    return { grupos: Object.keys(gids).map(function (k) { return gids[k]; }), filas: filas, total: total, parte: pa, monto: Math.round(total * pa.porcentaje / 100) };
+  }
 
   var LOGO = 'data:image/webp;base64,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';
   function logo(cls) { return '<img class="logo' + (cls ? ' ' + cls : '') + '" src="' + LOGO + '" alt="Taichi del Encuentro">'; }
@@ -403,7 +430,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   function barra() {
     var tabs = [['hoy', 'Grupos'], ['alumnos', 'Alumnos'], ['cobro', 'Cobros'], ['panel', 'Panel']];
-    var actual = { lista: 'hoy', ficha: 'alumnos', editar: 'alumnos', grupos: 'hoy', grupoEdit: 'hoy', grupoCerrar: 'hoy', asist: (S.volverAsist === 'lista' ? 'hoy' : 'panel') }[S.vista] || S.vista;
+    var actual = { lista: 'hoy', ficha: 'alumnos', editar: 'alumnos', grupos: 'hoy', grupoEdit: 'hoy', grupoCerrar: 'hoy', asist: (S.volverAsist === 'lista' ? 'hoy' : 'panel'), parte: 'panel' }[S.vista] || S.vista;
     return '<nav class="barra" aria-label="Secciones"><div>' + tabs.map(function (t) {
       return '<button data-a="ir" data-barra="1" data-v="' + t[0] + '"' + (actual === t[0] ? ' aria-current="page"' : '') + '>' + IC[t[0] === 'cobro' ? 'cobros' : t[0]] + t[1] + '</button>';
     }).join('') + '</div></nav>';
@@ -751,6 +778,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<div class="fila" style="flex-wrap:wrap"><span class="muted">Falta cobrar</span><b class="mal" style="font-size:20px">' + plata(Math.max(0, r.esperado - r.cobrado)) + '</b></div>' +
       // Quién debe está en Cobros (un solo lugar); acá solo el atajo, al mismo mes.
       '<button class="btn sec" data-a="verDeben">' + (r.deben.length ? 'Ver quién debe ' + MESES[Number(mes.slice(5)) - 1] + ' (' + r.deben.length + ')' : 'Pagaron todos') + '</button></section>' +
+      vPartesPanel(mes) +
       '<section style="display:flex;flex-direction:column;gap:10px"><h2>Por grupo</h2>';
     r.grupos.sort(function (a, b) { return porHora(a.g, b.g); }).forEach(function (x) {
       var delG = D.asistencias.filter(function (y) { return y.grupo === x.g.id && mesDe(y.fecha) === mes; }), clases = delG.length;
@@ -769,6 +797,21 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<button class="btn sec" data-a="ir" data-v="conectar">Cambiar conexión</button>' +
       '<p class="muted chico" style="text-align:center;margin:12px 0 0">Hecho por <a href="https://am-digital.com.ar" target="_blank" rel="noopener" style="font-weight:700">AM Digital</a>, de complejo a simple</p></main>';
     return h;
+  }
+
+  // Lo que se le paga a cada lugar que tiene una parte cargada (ej. el 30% de Liniers para la UVLS).
+  function vPartesPanel(mes) {
+    if (!hayPartes()) return '';
+    var nm = MESES[Number(mes.slice(5)) - 1];
+    return D.sedes.filter(function (x) { return x.porcentaje > 0; }).map(function (x) {
+      var R = resumenParte(x.sede, mes);
+      if (!R.grupos.length || (!R.total && !R.grupos.some(function (g) { return g.activo !== false; }))) return '';
+      var para = x.para || 'el lugar';
+      return '<section class="card"><b style="font-size:17px;font-weight:600">' + esc(R.grupos[0].sede) + ' · ' + esc(txtPct(x.porcentaje)) + ' para ' + esc(para) + '</b>' +
+        '<div class="fila" style="flex-wrap:wrap"><span class="muted">Cobrado de ' + nm + '</span><b style="font-size:18px">' + plata(R.total) + '</b></div>' +
+        '<div class="fila" style="flex-wrap:wrap"><span class="muted">' + esc(txtPct(x.porcentaje)) + ' para ' + esc(para) + '</span><b class="mal" style="font-size:20px">' + plata(R.monto) + '</b></div>' +
+        '<button class="btn sec" data-a="verParte" data-s="' + esc(x.sede) + '">Ver el detalle para mandar</button></section>';
+    }).join('');
   }
 
   // ---------- Asistencias de un grupo (desde Panel) ----------
@@ -849,6 +892,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<div class="campo"><span style="font-size:15px;font-weight:600">Días</span><div class="dias7">' +
       LETRAS.map(function (l) { return '<button class="opcion" data-a="grupoDia" data-l="' + l + '" aria-pressed="' + (G.dias.indexOf(l) >= 0) + '" aria-label="' + NOMBRE_LETRA[l] + '">' + l + '</button>'; }).join('') +
       '</div><span class="muted chico">' + esc(diasLargos(G.dias.join(',')) || 'Elegí al menos un día') + '</span></div>' +
+      (hayPartes() ? '<div class="card" style="gap:10px"><b style="font-size:17px">Parte para el lugar</b>' +
+        '<span class="muted chico">Si le pagás al lugar una parte de lo que cobrás (por ejemplo, el 30%). Vale para todos los grupos de ' + esc(G.sede.trim() || 'este lugar') + '. Si no le pagás nada, dejalo en 0.</span>' +
+        '<div class="campo"><label for="g-pct">Porcentaje</label><input id="g-pct" type="text" inputmode="decimal" data-campo="pct" value="' + esc(G.pct) + '" placeholder="Ej. 30"></div>' +
+        '<div class="campo"><label for="g-para">¿A quién se le paga?</label><input id="g-para" type="text" data-campo="para" value="' + esc(G.para) + '" placeholder="Ej. UVLS"></div></div>' : '') +
       (G.error ? '<p class="err">' + esc(G.error) + '</p>' : '') +
       '<button class="btn" data-a="grupoGuardar"' + (G.guardando ? ' disabled' : '') + '>' + (G.guardando ? 'Guardando…' : (nuevo ? 'Crear clase' : (G.activo === false ? 'Guardar y volver a abrir' : 'Guardar cambios'))) + '</button>' +
       (!nuevo && G.activo !== false ? '<button class="btn sec" style="border-color:var(--debe);color:var(--debe)" data-a="ir" data-v="grupoCerrar">Cerrar este grupo</button>' : '') +
@@ -896,11 +943,32 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<button class="btn" id="pres-volver" data-a="presCerrar">Volver</button></div></div>';
   }
 
+  // ---------- Detalle de la parte de un lugar (desde Panel) ----------
+  // Pensado para sacarle una captura (como el pedacito de Excel de antes) o mandarlo por WhatsApp.
+  // Es una pantalla normal (no un cuadro): si la lista es larga, la captura larga del celular la toma entera.
+  function vParte() {
+    var mes = S.mesPanel, R = resumenParte(S.parte, mes); if (!R.grupos.length) { S.vista = 'panel'; return vPanel(); }
+    var sede = R.grupos[0].sede, nm = MESES[Number(mes.slice(5)) - 1], para = R.parte.para || 'el lugar', pc = txtPct(R.parte.porcentaje);
+    var nav = '<div class="fila"><p class="sub">' + esc(nombreMes(mes)) + '</p><div class="dianav"><button data-a="mesPanel" data-n="-1" aria-label="Mes anterior">‹</button><button data-a="mesPanel" data-n="1" aria-label="Mes siguiente">›</button></div></div>';
+    var h = '<header><button class="volver" data-a="ir" data-v="panel">‹ Panel</button>' + nav + '<h1 id="parte-t">' + esc(sede) + '</h1>' + sync() + '</header><main>';
+    if (mes !== mesCargado) return h + '<p class="vacio">' + (S.cargando ? 'Cargando…' : (S.sinSenal ? 'Sin señal: para ver otro mes hace falta conexión.' : 'No se pudo cargar este mes.')) + '</p></main>';
+    var nombres = R.grupos.filter(function (g) { return g.activo !== false || R.filas.some(function (f) { return valoresEn(f.a, mes).grupo === g.id; }); }).sort(porHora).map(function (g) { return g.nombre; });
+    var txt = sede + ' · ' + nombreMes(mes) + '\n\n' + R.filas.map(function (f) { return f.a.nombre + ': ' + plata(f.monto); }).join('\n') +
+      (R.filas.length ? '\n\n' : '') + 'Total: ' + plata(R.total) + '\n' + pc + ' para ' + para + ': ' + plata(R.monto);
+    return h + '<section class="card parte" style="gap:6px"><b style="font-size:17px">' + esc(sede + ' · ' + nombreMes(mes)) + '</b><span class="muted chico">Cuotas de ' + nm + ' cobradas' + (nombres.length ? ' · ' + esc(nombres.join(', ')) : '') + '</span>' +
+      (R.filas.length ? '<ul class="parte-lista">' + R.filas.map(function (f) {
+        return '<li><span>' + esc(f.a.nombre) + '</span><b>' + plata(f.monto) + '</b></li>';
+      }).join('') + '</ul>' : '<p class="muted" style="margin:0">Todavía nadie pagó ' + nm + '.</p>') +
+      '<div class="parte-tot"><div><span>Total</span><b>' + plata(R.total) + '</b></div><div class="parte-va"><span>' + esc(pc + ' para ' + para) + '</span><b>' + plata(R.monto) + '</b></div></div></section>' +
+      '<a class="btn" href="https://wa.me/?text=' + encodeURIComponent(txt) + '" target="_blank" rel="noopener">Mandar por WhatsApp</a>' +
+      '<p class="muted chico" style="margin:0">Para mandarlo: sacale una captura a esta pantalla, o tocá "Mandar por WhatsApp" y elegí a quién. Cuenta las cuotas de ' + nm + ', también las que se paguen más adelante.</p></main>';
+  }
+
   // ---------- Tutorial ----------
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 11;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 12;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
@@ -944,6 +1012,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     { v: 6, t: 'Quién debe', p: 'La lista de quién debe está en Cobros. Con las flechas ‹ › de arriba ves los meses anteriores, y tocando a alguien le cobrás ese mes. Desde el Panel, el botón "Ver quién debe" te lleva ahí.',
       demo: '<div class="fila"><b>Octubre 2026</b><span style="display:flex;gap:4px"><span class="btn sec" style="min-height:40px;width:40px;padding:0">‹</span><span class="btn sec" style="min-height:40px;width:40px;padding:0">›</span></span></div>' +
         '<div class="alumno"><span class="nom"><b>Gustavo</b><span class="estado mal">Debe octubre · $55.000</span></span></div>' },
+    { v: 12, t: 'Lo que le pagás al lugar', p: 'En el Panel, debajo de lo cobrado, ves cuánto le toca a la UVLS ese mes: el 30% de lo que se cobró de las cuotas de Liniers (también lo que se pague tarde). Tocá "Ver el detalle para mandar": aparece cada alumno con lo que pagó, el total y el 30%. Sacale una captura o tocá "Mandar por WhatsApp" y elegí a quién. Si cambia el porcentaje, se corrige con el lápiz del grupo, en "Parte para el lugar".',
+      demo: '<div class="fila"><span class="muted">30% para UVLS</span><b class="mal" style="font-size:20px">$99.000</b></div><div class="btn sec" style="font-size:16px">Ver el detalle para mandar</div>' },
     { v: 6, t: 'Cambios a mitad de mes', p: 'Cuando le cambiás la cuota o el grupo a alguien, o lo das de baja, la app te pregunta desde qué mes vale. Si ya te pagó este mes con la cuota de antes, o si te debe este mes y se va, elegí el mes que viene.',
       demo: '<div class="opcion" style="text-align:left;padding:10px 14px">Desde este mes</div><div class="opcion" style="text-align:left;padding:10px 14px">Desde el mes que viene</div>' },
     { v: 10, t: 'Grupos que hoy no tienen clase', p: 'Si entrás a un grupo que hoy no tiene clase (de los de abajo en Grupos), ves su lista pero no podés marcar presentes: arriba aparece un aviso en naranja. Así no quedan presentes en un día sin clase. Si querías otro grupo, volvé con "‹ Grupos". Para ver su última clase, tocá "‹ Anterior".',
@@ -981,7 +1051,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
           if (nuevos.length) { S.tutoAuto = true; S.tuto = nuevos[0]; S.tutoNovedad = nuevos; } else marcarTutoVisto();
         }
       }
-      h = ({ hoy: vHoy, lista: vLista, cobro: vCobro, alumnos: vAlumnos, ficha: vFicha, editar: vEditar, panel: vPanel, grupos: vHoy, grupoEdit: vGrupoEdit, grupoCerrar: vGrupoCerrar, asist: vAsist })[S.vista]() + barra();
+      h = ({ hoy: vHoy, lista: vLista, cobro: vCobro, alumnos: vAlumnos, ficha: vFicha, editar: vEditar, panel: vPanel, grupos: vHoy, grupoEdit: vGrupoEdit, grupoCerrar: vGrupoCerrar, asist: vAsist, parte: vParte })[S.vista]() + barra();
       if (S.presDia && S.tuto == null) { h += vPresentes(); foco = 'pres-volver'; pos = null; }
       if (S.tuto != null) { h += vTutorial(); foco = 'tuto-sig'; pos = null; }
     }
@@ -1053,18 +1123,26 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     }).catch(function (e) { E.guardando = false; E.pregunta = null; E.error = (sinSenalReal(e) ? 'Sin señal: esto necesita conexión. No se guardó nada.' : 'No se guardó (' + e.message + ').'); render(); });
   }
 
+  // Pone en el formulario del grupo la parte que ya tiene cargada ese lugar.
+  function cargarParte(G) {
+    var p = parteDe(G.sede);
+    G.pct = p && p.porcentaje ? String(p.porcentaje).replace('.', ',') : '';
+    G.para = p ? p.para : '';
+  }
+
   // ---------- Acciones ----------
   var A = {
     tutoAbrir: function () { S.tuto = 0; S.tutoNovedad = false; render(); },
-    grupoNuevo: function () { S.gedit = { id: '', sede: '', hora: '', dias: [], activo: true }; ir('grupoEdit'); },
+    grupoNuevo: function () { S.gedit = { id: '', sede: '', hora: '', dias: [], activo: true, pct: '', para: '' }; ir('grupoEdit'); },
     grupoEditar: function (d) {
       var g = grupo(d.g); if (!g) return;
       S.grupo = g.id;
       S.gedit = { id: g.id, sede: g.sede, hora: g.hora, dias: g.dias.split(',').map(function (x) { return x.trim(); }).filter(Boolean), activo: g.activo !== false,
         sedeOriginal: g.sede, horaOriginal: g.hora, destino: null };
+      cargarParte(S.gedit);
       ir('grupoEdit');
     },
-    grupoSede: function (d) { S.gedit.sede = d.s; render(); },
+    grupoSede: function (d) { S.gedit.sede = d.s; cargarParte(S.gedit); render(); },
     grupoDia: function (d) {
       var G = S.gedit, i = G.dias.indexOf(d.l);
       if (i >= 0) G.dias.splice(i, 1); else G.dias.push(d.l);
@@ -1075,15 +1153,27 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       if (!G.sede.trim()) { G.error = 'Falta el lugar.'; return render(); }
       if (!/^\d{1,2}:\d{2}$/.test(G.hora)) { G.error = 'Falta la hora.'; return render(); }
       if (!G.dias.length) { G.error = 'Elegí al menos un día.'; return render(); }
+      var parte = null;
+      if (hayPartes()) {
+        var tp = String(G.pct || '').replace('%', '').replace(',', '.').trim(), pc = tp ? Number(tp) : 0;
+        if (!isFinite(pc) || pc < 0 || pc > 100) { G.error = 'El porcentaje tiene que ser un número de 0 a 100.'; return render(); }
+        parte = { porcentaje: pc, para: String(G.para || '').trim() };
+      }
       G.guardando = true; G.error = null; render();
       var hora = G.hora.replace(/^0(\d):/, '$1:');
       // "bonzi", "Bonzi " o "Bonzí" se guardan como el lugar que ya existe, así no aparece un lugar repetido.
-      function norm(x) { return x.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' '); }
-      var yaExiste = D.grupos.find(function (x) { return norm(x.sede) === norm(G.sede); });
+      var yaExiste = D.grupos.find(function (x) { return normSede(x.sede) === normSede(G.sede); });
       if (yaExiste) G.sede = yaExiste.sede;
       // Guardar un grupo cerrado lo vuelve a abrir.
-      llamar('guardarGrupo', { g: { id: G.id, sede: G.sede.trim(), hora: hora, dias: G.dias.join(','), activo: true } }).then(function (g) {
+      var envio = { id: G.id, sede: G.sede.trim(), hora: hora, dias: G.dias.join(','), activo: true };
+      if (parte) envio.parte = parte;
+      llamar('guardarGrupo', { g: envio }).then(function (g) {
         cambios++;
+        if (parte) {
+          var ya = parteDe(g.sede);
+          if (ya) { ya.porcentaje = parte.porcentaje; ya.para = parte.para; }
+          else if (parte.porcentaje || parte.para) D.sedes.push({ sede: g.sede, porcentaje: parte.porcentaje, para: parte.para });
+        }
         var i = D.grupos.findIndex(function (x) { return x.id === g.id; });
         if (i >= 0) D.grupos[i] = g; else D.grupos.push(g);
         toast(G.id ? (G.activo === false ? 'Grupo abierto de nuevo' : 'Grupo guardado') : 'Clase creada: ' + g.nombre);
@@ -1133,6 +1223,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     },
     verPresentes: function (d) { S.presDia = { g: d.g, f: d.f }; render(); },
     presCerrar: function () { S.presDia = null; render(); },
+    verParte: function (d) { S.parte = d.s; ir('parte'); },
     verAsist: function (d) { S.asistGrupo = d.g; S.volverAsist = S.vista; if (d.mes) S.mesPanel = d.mes; ir('asist'); },
     mesPanel: function (d) { S.mesPanel = sumarMes(S.mesPanel, Number(d.n)); render(); asegurarMes(); },
     lista: function (d) { S.grupo = d.g; ir('lista'); },
