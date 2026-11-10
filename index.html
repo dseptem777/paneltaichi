@@ -402,6 +402,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function parteDe(sede) { return (D.sedes || []).find(function (x) { return normSede(x.sede) === normSede(sede); }) || null; }
   function txtPct(n) { return String(n).replace('.', ',') + '%'; }
   // Lo cobrado de las cuotas de un mes en un lugar (mismo cálculo que el Panel por grupo), alumno por alumno.
+  // Salen solo los que pagaron algo de ese mes (Héctor, 6/11).
   function resumenParte(sede, mes) {
     var gids = {}, filas = [], total = 0;
     D.grupos.forEach(function (g) { if (normSede(g.sede) === normSede(sede)) gids[g.id] = g; });
@@ -413,6 +414,14 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     filas.sort(function (x, y) { return porNombre(x.a, y.a); });
     var pa = parteDe(sede) || { porcentaje: 0, para: '' };
     return { grupos: Object.keys(gids).map(function (k) { return gids[k]; }), filas: filas, total: total, parte: pa, monto: Math.round(total * pa.porcentaje / 100) };
+  }
+  // Lo que entró por transferencia en un mes (Héctor, 10/11: "así lo haga el 5 del mes o el 30").
+  // Cuenta por la FECHA del pago, no por el mes de la cuota: es lo que tiene que haber entrado a la cuenta ese mes.
+  function resumenTransf(mes) {
+    var filas = D.pagos.filter(function (p) { return String(p.medio || '').trim().toLowerCase() === 'transferencia' && String(p.fecha || '').slice(0, 7) === mes; })
+      .map(function (p) { var a = D.alumnos.find(function (x) { return x.id === p.alumno; }); return { p: p, nombre: a ? a.nombre : '(alumno borrado)' }; });
+    filas.sort(function (x, y) { return x.p.fecha.localeCompare(y.p.fecha) || x.nombre.localeCompare(y.nombre, 'es'); });
+    return { filas: filas, total: filas.reduce(function (s, f) { return s + f.p.monto; }, 0) };
   }
 
   var LOGO = 'data:image/webp;base64,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';
@@ -430,7 +439,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   function barra() {
     var tabs = [['hoy', 'Grupos'], ['alumnos', 'Alumnos'], ['cobro', 'Cobros'], ['panel', 'Panel']];
-    var actual = { lista: 'hoy', ficha: 'alumnos', editar: 'alumnos', grupos: 'hoy', grupoEdit: 'hoy', grupoCerrar: 'hoy', asist: (S.volverAsist === 'lista' ? 'hoy' : 'panel'), parte: 'panel' }[S.vista] || S.vista;
+    var actual = { lista: 'hoy', ficha: 'alumnos', editar: 'alumnos', grupos: 'hoy', grupoEdit: 'hoy', grupoCerrar: 'hoy', asist: (S.volverAsist === 'lista' ? 'hoy' : 'panel'), parte: 'panel', transf: 'cobro' }[S.vista] || S.vista;
     return '<nav class="barra" aria-label="Secciones"><div>' + tabs.map(function (t) {
       return '<button data-a="ir" data-barra="1" data-v="' + t[0] + '"' + (actual === t[0] ? ' aria-current="page"' : '') + '>' + IC[t[0] === 'cobro' ? 'cobros' : t[0]] + t[1] + '</button>';
     }).join('') + '</div></nav>';
@@ -638,6 +647,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var h = '<header><div class="fila"><p class="sub">' + esc(nombreMes(mes)) + '</p><div class="dianav"><button data-a="mesCobro" data-n="-1" aria-label="Mes anterior">‹</button><button data-a="mesCobro" data-n="1" aria-label="Mes siguiente">›</button></div></div>' +
       '<h1>Cobros</h1>' + sync() + '</header><main>' +
       (mes !== mesDe(hoy()) ? '<button class="btn sec" data-a="mesCobroHoy">Volver a ' + esc(MESES[Number(mesDe(hoy()).slice(5)) - 1]) + '</button>' : '') +
+      '<button class="btn sec" data-a="ir" data-v="transf">Transferencias de ' + esc(nomMes) + '</button>' +
       '<div class="campo"><label for="b-cobro">Buscar alumno</label><input id="b-cobro" type="search" data-campo="buscar" value="' + esc(S.buscar) + '" placeholder="Nombre"></div>';
     var lista = q ? D.alumnos.filter(function (a) { return a.activo && a.nombre.toLowerCase().indexOf(q) >= 0; }).sort(porNombre).map(function (a) { return { a: a }; }) : r.deben;
     h += '<h2>' + (q ? 'Resultados' : 'Deben ' + nomMes + ' (' + r.deben.length + ')') + '</h2><ul class="lista">';
@@ -964,11 +974,26 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<p class="muted chico" style="margin:0">Para mandarlo: sacale una captura a esta pantalla, o tocá "Mandar por WhatsApp" y elegí a quién. Cuenta las cuotas de ' + nm + ', también las que se paguen más adelante.</p></main>';
   }
 
+  // ---------- Transferencias del mes (desde Cobros) ----------
+  // Pantalla normal (no un cuadro), como la de la parte: la captura larga del celular la toma entera.
+  // No necesita señal: los pagos vienen todos.
+  function vTransf() {
+    var mes = S.mesCobro, R = resumenTransf(mes), nm = MESES[Number(mes.slice(5)) - 1], n = R.filas.length;
+    var nav = '<div class="fila"><p class="sub">' + esc(nombreMes(mes)) + '</p><div class="dianav"><button data-a="mesCobro" data-n="-1" aria-label="Mes anterior">‹</button><button data-a="mesCobro" data-n="1" aria-label="Mes siguiente">›</button></div></div>';
+    var h = '<header><button class="volver" data-a="ir" data-v="cobro">‹ Cobros</button>' + nav + '<h1 id="transf-t">Transferencias</h1>' + sync() + '</header><main>';
+    return h + '<section class="card parte" style="gap:6px"><b style="font-size:17px">Transferencias de ' + esc(nombreMes(mes)) + '</b><span class="muted chico">Lo que te transfirieron entre el 1 y el último día de ' + nm + '</span>' +
+      (n ? '<ul class="parte-lista">' + R.filas.map(function (f) {
+        var otra = f.p.mes !== mes ? ' · cuota de ' + MESES[Number(String(f.p.mes).slice(5)) - 1] + (String(f.p.mes).slice(0, 4) !== mes.slice(0, 4) ? ' ' + String(f.p.mes).slice(0, 4) : '') : '';
+        return '<li><span>' + esc(f.nombre) + '<br><span class="muted chico" style="font-weight:400">' + esc(fechaCorta(f.p.fecha) + otra) + '</span></span><b>' + plata(f.p.monto) + '</b></li>';
+      }).join('') + '</ul>' : '<p class="muted" style="margin:0">En ' + nm + ' no hay pagos por transferencia.</p>') +
+      '<div class="parte-tot"><div class="parte-va"><span>Total (' + n + (n === 1 ? ' pago' : ' pagos') + ')</span><b>' + plata(R.total) + '</b></div></div></section></main>';
+  }
+
   // ---------- Tutorial ----------
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 12;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 13;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
@@ -1012,8 +1037,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     { v: 6, t: 'Quién debe', p: 'La lista de quién debe está en Cobros. Con las flechas ‹ › de arriba ves los meses anteriores, y tocando a alguien le cobrás ese mes. Desde el Panel, el botón "Ver quién debe" te lleva ahí.',
       demo: '<div class="fila"><b>Octubre 2026</b><span style="display:flex;gap:4px"><span class="btn sec" style="min-height:40px;width:40px;padding:0">‹</span><span class="btn sec" style="min-height:40px;width:40px;padding:0">›</span></span></div>' +
         '<div class="alumno"><span class="nom"><b>Gustavo</b><span class="estado mal">Debe octubre · $55.000</span></span></div>' },
-    { v: 12, t: 'Lo que le pagás al lugar', p: 'En el Panel, debajo de lo cobrado, ves cuánto le toca a la UVLS ese mes: el 30% de lo que se cobró de las cuotas de Liniers (también lo que se pague tarde). Tocá "Ver el detalle para mandar": aparece cada alumno con lo que pagó, el total y el 30%. Sacale una captura o tocá "Mandar por WhatsApp" y elegí a quién. Si cambia el porcentaje, se corrige con el lápiz del grupo, en "Parte para el lugar".',
+    { v: 12, t: 'Lo que le pagás al lugar', p: 'En el Panel, debajo de lo cobrado, ves cuánto le toca a la UVLS ese mes: el 30% de lo que se cobró de las cuotas de Liniers (también lo que se pague tarde). Tocá "Ver el detalle para mandar": aparece cada alumno que pagó con lo que pagó, el total y el 30%. Sacale una captura o tocá "Mandar por WhatsApp" y elegí a quién. Si cambia el porcentaje, se corrige con el lápiz del grupo, en "Parte para el lugar".',
       demo: '<div class="fila"><span class="muted">30% para UVLS</span><b class="mal" style="font-size:20px">$99.000</b></div><div class="btn sec" style="font-size:16px">Ver el detalle para mandar</div>' },
+    { v: 13, t: 'Cuánto te transfirieron', p: 'En Cobros, tocá "Transferencias de" y el mes: ves quién te transfirió, qué día y cuánto, y el total. Cuenta lo que te transfirieron en ese mes, sea el 5 o el 30, aunque sea la cuota de otro mes (en ese caso lo dice abajo del nombre). Con las flechas ‹ › cambiás de mes.',
+      demo: '<div class="btn sec" style="font-size:16px">Transferencias de noviembre</div><div class="fila"><span>Gustavo<br><span class="muted chico">3/11</span></span><b>$55.000</b></div>' },
     { v: 6, t: 'Cambios a mitad de mes', p: 'Cuando le cambiás la cuota o el grupo a alguien, o lo das de baja, la app te pregunta desde qué mes vale. Si ya te pagó este mes con la cuota de antes, o si te debe este mes y se va, elegí el mes que viene.',
       demo: '<div class="opcion" style="text-align:left;padding:10px 14px">Desde este mes</div><div class="opcion" style="text-align:left;padding:10px 14px">Desde el mes que viene</div>' },
     { v: 10, t: 'Grupos que hoy no tienen clase', p: 'Si entrás a un grupo que hoy no tiene clase (de los de abajo en Grupos), ves su lista pero no podés marcar presentes: arriba aparece un aviso en naranja. Así no quedan presentes en un día sin clase. Si querías otro grupo, volvé con "‹ Grupos". Para ver su última clase, tocá "‹ Anterior".',
@@ -1051,7 +1078,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
           if (nuevos.length) { S.tutoAuto = true; S.tuto = nuevos[0]; S.tutoNovedad = nuevos; } else marcarTutoVisto();
         }
       }
-      h = ({ hoy: vHoy, lista: vLista, cobro: vCobro, alumnos: vAlumnos, ficha: vFicha, editar: vEditar, panel: vPanel, grupos: vHoy, grupoEdit: vGrupoEdit, grupoCerrar: vGrupoCerrar, asist: vAsist, parte: vParte })[S.vista]() + barra();
+      h = ({ hoy: vHoy, lista: vLista, cobro: vCobro, alumnos: vAlumnos, ficha: vFicha, editar: vEditar, panel: vPanel, grupos: vHoy, grupoEdit: vGrupoEdit, grupoCerrar: vGrupoCerrar, asist: vAsist, parte: vParte, transf: vTransf })[S.vista]() + barra();
       if (S.presDia && S.tuto == null) { h += vPresentes(); foco = 'pres-volver'; pos = null; }
       if (S.tuto != null) { h += vTutorial(); foco = 'tuto-sig'; pos = null; }
     }
