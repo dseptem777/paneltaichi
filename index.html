@@ -423,7 +423,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       } else sinCuota++;
     });
     deben.sort(function (x, y) { return porNombre(x.a, y.a); });
-    return { esperado: esperado, cobrado: cobrado, deben: deben, activos: activos, sinCuota: sinCuota,
+    // Lo que falta es la suma de lo que debe cada uno (lo mismo que "Ver quién debe"): esperado − cobrado
+    // daba de menos si alguien pagó de más o pagó uno que ese mes no está activo (13/11).
+    var falta = deben.reduce(function (s, x) { return s + x.falta; }, 0);
+    return { esperado: esperado, cobrado: cobrado, deben: deben, falta: falta, activos: activos, sinCuota: sinCuota,
       grupos: Object.keys(grupos).map(function (k) { return grupos[k]; }) };
   }
   function pct(a, b) { return b > 0 ? Math.min(100, Math.round(a * 100 / b)) : 0; }
@@ -817,7 +820,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<div class="pista" style="height:12px"><div style="width:' + pct(r.cobrado, r.esperado) + '%"></div></div>' +
       '<div class="dos" style="padding-top:4px"><div><div style="font-size:22px;font-weight:700">' + activos + '</div><div class="muted chico">alumnos</div></div>' +
       '<div><div style="font-size:22px;font-weight:700" class="ok">' + Math.max(0, pagaron) + '</div><div class="muted chico">pagaron</div></div></div>' +
-      '<div class="fila" style="flex-wrap:wrap"><span class="muted">Falta cobrar</span><b class="mal" style="font-size:20px">' + plata(Math.max(0, r.esperado - r.cobrado)) + '</b></div>' +
+      '<div class="fila" style="flex-wrap:wrap"><span class="muted">Falta cobrar</span><b class="mal" style="font-size:20px">' + plata(r.falta) + '</b></div>' +
       // Quién debe está en Cobros (un solo lugar); acá solo el atajo, al mismo mes.
       '<button class="btn sec" data-a="verDeben">' + (r.deben.length ? 'Ver quién debe ' + MESES[Number(mes.slice(5)) - 1] + ' (' + r.deben.length + ')' : 'Pagaron todos') + '</button></section>' +
       vPartesPanel(mes) +
@@ -935,7 +938,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       LETRAS.map(function (l) { return '<button class="opcion" data-a="grupoDia" data-l="' + l + '" aria-pressed="' + (G.dias.indexOf(l) >= 0) + '" aria-label="' + NOMBRE_LETRA[l] + '">' + l + '</button>'; }).join('') +
       '</div><span class="muted chico">' + esc(diasLargos(G.dias.join(',')) || 'Elegí al menos un día') + '</span></div>' +
       (hayPartes() ? '<div class="card" style="gap:10px"><b style="font-size:17px">Parte para el lugar</b>' +
-        '<span class="muted chico">Si le pagás al lugar una parte de lo que cobrás (por ejemplo, el 30%). Vale para todos los grupos de ' + esc(G.sede.trim() || 'este lugar') + '. Si no le pagás nada, dejalo en 0.</span>' +
+        '<span class="muted chico">Si le pagás al lugar una parte de lo que cobrás (por ejemplo, el 30%). Vale para todos los grupos de <span id="g-parte-sede">' + esc(G.sede.trim() || 'este lugar') + '</span>. Si no le pagás nada, dejalo en 0.</span>' +
         '<div class="campo"><label for="g-pct">Porcentaje</label><input id="g-pct" type="text" inputmode="decimal" data-campo="pct" value="' + esc(G.pct) + '" placeholder="Ej. 30"></div>' +
         '<div class="campo"><label for="g-para">¿A quién se le paga?</label><input id="g-para" type="text" data-campo="para" value="' + esc(G.para) + '" placeholder="Ej. UVLS"></div></div>' : '') +
       (G.error ? '<p class="err">' + esc(G.error) + '</p>' : '') +
@@ -1191,6 +1194,15 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     G.pct = p && p.porcentaje ? String(p.porcentaje).replace('.', ',') : '';
     G.para = p ? p.para : '';
   }
+  // Lugar escrito a mano (13/11): si Héctor no tocó la parte, se trae la del lugar escrito (vacía si es nuevo).
+  // Se cambia directo en la pantalla, sin redibujar, para no perder el teclado.
+  function lugarEscrito(G) {
+    var sp = document.getElementById('g-parte-sede'); if (sp) sp.textContent = G.sede.trim() || 'este lugar';
+    if (G.parteTocada) return;
+    cargarParte(G);
+    var ip = document.getElementById('g-pct'), ia = document.getElementById('g-para');
+    if (ip) ip.value = G.pct; if (ia) ia.value = G.para;
+  }
 
   // ---------- Acciones ----------
   var A = {
@@ -1204,7 +1216,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       cargarParte(S.gedit);
       ir('grupoEdit');
     },
-    grupoSede: function (d) { S.gedit.sede = d.s; cargarParte(S.gedit); render(); },
+    grupoSede: function (d) { S.gedit.sede = d.s; S.gedit.parteTocada = false; cargarParte(S.gedit); render(); },
     grupoDia: function (d) {
       var G = S.gedit, i = G.dias.indexOf(d.l);
       if (i >= 0) G.dias.splice(i, 1); else G.dias.push(d.l);
@@ -1216,7 +1228,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       if (!/^\d{1,2}:\d{2}$/.test(G.hora)) { G.error = 'Falta la hora.'; return render(); }
       if (!G.dias.length) { G.error = 'Elegí al menos un día.'; return render(); }
       var parte = null;
-      if (hayPartes()) {
+      // Si Héctor no tocó la parte, no se manda: así nunca se pisa la que ya tiene el lugar (13/11).
+      if (hayPartes() && G.parteTocada) {
         var tp = String(G.pct || '').replace('%', '').replace(',', '.').trim(), pc = tp ? Number(tp) : 0;
         if (!isFinite(pc) || pc < 0 || pc > 100) { G.error = 'El porcentaje tiene que ser un número de 0 a 100.'; return render(); }
         parte = { porcentaje: pc, para: String(G.para || '').trim() };
@@ -1470,6 +1483,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       dest[c] = soloNumero(v);
       e.target.value = dest[c] ? plata(dest[c]) : '';
     } else dest[c] = v;
+    if (S.vista === 'grupoEdit') {
+      if (c === 'pct' || c === 'para') dest.parteTocada = true;
+      else if (c === 'sede') lugarEscrito(dest);
+    }
   });
   document.addEventListener('change', function (e) {
     var c = e.target.dataset && e.target.dataset.campo; if (!c || c === 'buscar' || c === 'monto' || c === 'cuota') return;
