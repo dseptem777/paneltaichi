@@ -227,7 +227,13 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   // ---------- Estado ----------
   var D = null;          // { planilla, grupos, alumnos, pagos, asistencias }
-  var mesCargado = null; // mes de las asistencias que hay en D
+  var mesCargado = null; // último mes bajado
+  // Meses cuyas asistencias están en D: el último bajado y, si es otro, también el de hoy (se conserva al
+  // mirar otro mes, así sin señal Grupos y la lista de hoy siguen andando). Un mes que no está no se dibuja
+  // con 0 presentes: dice "Cargando…" (15/11).
+  var mesesListos = [];
+  function hayMes(m) { return mesesListos.indexOf(m) >= 0; }
+  function avisoMes() { return '<p class="vacio">' + (S.sinSenal ? 'Sin señal: para ver otro mes hace falta conexión.' : (S.error && !S.cargando ? 'No se pudo cargar este mes.' : 'Cargando…')) + '</p>'; }
   var S = {
     vista: cfg ? 'hoy' : 'conectar',
     fecha: hoy(), grupo: null, alumno: null, mesPanel: mesDe(hoy()), mesCobro: mesDe(hoy()),
@@ -253,7 +259,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function guardarRechazos() { escribirLS(RECH_LS, rechazos); }
   // Cuenta lo que llegó a la planilla. Si cambia mientras baja un "todo", lo que bajó ya es viejo.
   var cambios = 0;
-  function guardarCache() { if (D && S.ultima) escribirLS(CACHE_LS, { D: D, mes: mesCargado, t: S.ultima.getTime() }); }
+  function guardarCache() { if (D && S.ultima) escribirLS(CACHE_LS, { D: D, mes: mesCargado, meses: mesesListos, t: S.ultima.getTime() }); }
   function claveP(d) { return d.fecha + '|' + d.grupo + '|' + d.alumno; }
 
   function aplicarPresente(d, on) {
@@ -332,7 +338,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     return vaciarCola().then(function () { antes = cambios; return llamar('todo', { mes: mes }); }).then(function (d) {
       // Si mientras bajaba llegó algo nuevo a la planilla (un cobro, un presente), esto ya es viejo: se pide de nuevo.
       if (cambios !== antes) { viejo = true; return; }
+      var mh = mesDe(hoy()), deHoy = (mes !== mh && hayMes(mh)) ? D.asistencias.filter(function (x) { return mesDe(x.fecha) === mh; }) : null;
       D = d; mesCargado = mes; S.ultima = new Date(); S.error = null; S.sinSenal = false;
+      if (deHoy) D.asistencias = D.asistencias.concat(deHoy);
+      mesesListos = deHoy ? [mes, mh] : [mes];
       aplicarCola(); guardarCache();
     }).catch(function (e) {
       S.error = e.message;
@@ -521,13 +530,13 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   // Pantalla de inicio: los grupos, sin plata (pedido de Héctor). Arriba las clases del día elegido.
   function tarjetaGrupo(g, f, deHoy) {
-    var al = alumnosDe(g.id, mesDe(f)), pr = presentesSet(f, g.id), n = Object.keys(pr).length;
+    var listo = hayMes(mesDe(f)), al = alumnosDe(g.id, mesDe(f)), pr = presentesSet(f, g.id), n = listo ? Object.keys(pr).length : 0;
     return '<div class="clase" style="cursor:default;padding:0;overflow:hidden;align-items:stretch;gap:0">' +
       '<button data-a="lista" data-g="' + esc(g.id) + '" aria-label="Ver grupo ' + esc(g.nombre) + '" style="display:flex;align-items:center;flex-grow:1;min-width:0;background:none;border:0;padding:12px 8px 12px 16px;text-align:left;cursor:pointer">' +
       '<span class="txt"><b style="font-size:20px;font-weight:700">' + esc(g.hora) + ' · ' + esc(g.sede) + '</b>' +
       '<span class="muted chico">' + esc(diasLargos(g.dias)) + '</span>' +
       '<span class="muted chico">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + (n ? ' · ' + n + (n === 1 ? ' presente' : ' presentes') : '') + '</span>' +
-      (deHoy ? (n ? '<span class="chip">Lista hecha</span>' : '<span class="chip fuerte">Pasar lista</span>') : '<span class="chip">Ver grupo</span>') + '</span></button>' +
+      (!listo ? '<span class="chip">Cargando…</span>' : deHoy ? (n ? '<span class="chip">Lista hecha</span>' : '<span class="chip fuerte">Pasar lista</span>') : '<span class="chip">Ver grupo</span>') + '</span></button>' +
       '<button data-a="grupoEditar" data-g="' + esc(g.id) + '" aria-label="Editar ' + esc(g.nombre) + '" title="Editar" style="flex-shrink:0;width:48px;border:0;border-left:1px solid var(--line);background:#F2F8F4;color:var(--verde-texto);cursor:pointer;display:flex;align-items:center;justify-content:center">' +
       '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></button></div>';
   }
@@ -593,7 +602,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   function vLista() {
     var g = grupo(S.grupo); if (!g) { S.vista = 'hoy'; return vHoy(); }
-    var f = S.fecha, mes = mesDe(f), al = alumnosDe(g.id, mes), pr = presentesSet(f, g.id), rec = recuperanEn(f, g.id);
+    var f = S.fecha, mes = mesDe(f), listo = hayMes(mes), al = alumnosDe(g.id, mes), pr = presentesSet(f, g.id), rec = recuperanEn(f, g.id);
     var n = Object.keys(pr).length, nr = rec.filter(function (a) { return pr[a.id]; }).length;
     var px = otraClase(g, f, 1), sinProx = !px || px > hoy(), futuro = f > hoy();
     // Día sin clase de este grupo (pasa si se abre desde "los demás grupos"): no se tilda, así no quedan
@@ -609,7 +618,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       (futuro ? '<p class="franja">Esta clase todavía no llegó: la lista se pasa ese día.</p>' :
         sinClase ? '<p class="franja">Este grupo no tiene clase ' + (f === hoy() ? 'hoy (' + esc(nomDia) + ')' : 'el ' + esc(nomDia) + ' ' + esc(fechaCorta(f))) + ', así que no se puede pasar lista. ¿Tocaste el grupo que querías? Para ver su última clase, tocá "‹ Anterior".</p>' :
         (f !== hoy() ? '<p class="franja">Estás viendo una clase pasada, no la de hoy.</p>' : '')) +
-      '<div class="fila"><p class="sub">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + '</p><p class="sub ok" style="font-weight:700">' + n + (n === 1 ? ' presente' : ' presentes') + (nr ? ' (' + nr + ' recupera' + (nr === 1 ? '' : 'n') + ')' : '') + '</p></div>' + sync() + '</header><main>' +
+      '<div class="fila"><p class="sub">' + al.length + (al.length === 1 ? ' alumno' : ' alumnos') + '</p>' + (listo ? '<p class="sub ok" style="font-weight:700">' + n + (n === 1 ? ' presente' : ' presentes') + (nr ? ' (' + nr + ' recupera' + (nr === 1 ? '' : 'n') + ')' : '') + '</p>' : '') + '</div>' + sync() + '</header><main>';
+    // Las asistencias de ese mes todavía no bajaron: nada de "0 presentes" ni tildes (antes se podía tildar con datos de otro mes).
+    if (!listo) return h + avisoMes() + '</main>';
+    h +=
       // Pedido de Héctor (5/11): ver de un vistazo solo los nombres de los que vinieron.
       (futuro ? '' : '<button class="btn sec" style="min-height:48px;font-size:16px;padding:0 8px" data-a="verPresentes" data-g="' + esc(g.id) + '" data-f="' + f + '">' + (f === hoy() ? 'Presentes hoy' : 'Presentes del ' + esc(fechaCorta(f))) + ' (' + n + ')</button>') +
       // Arriba de la lista (pedido de Héctor): con grupos largos no hay que bajar hasta el final.
@@ -814,7 +826,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   function vPanel() {
     var mes = S.mesPanel;
-    if (mes !== mesCargado) return '<header><div class="fila"><p class="sub">' + esc(nombreMes(mes)) + '</p><div class="dianav"><button data-a="mesPanel" data-n="-1" aria-label="Mes anterior">‹</button><button data-a="mesPanel" data-n="1" aria-label="Mes siguiente">›</button></div></div><h1>Panel</h1>' + sync() + '</header><main><p class="vacio">' +
+    if (!hayMes(mes)) return '<header><div class="fila"><p class="sub">' + esc(nombreMes(mes)) + '</p><div class="dianav"><button data-a="mesPanel" data-n="-1" aria-label="Mes anterior">‹</button><button data-a="mesPanel" data-n="1" aria-label="Mes siguiente">›</button></div></div><h1>Panel</h1>' + sync() + '</header><main><p class="vacio">' +
       (S.cargando ? 'Cargando…' : (S.sinSenal ? 'Sin señal: para ver otro mes hace falta conexión.' : 'No se pudo cargar este mes.')) + '</p></main>';
     var r = resumenMes(mes), activos = r.activos;
     var pagaron = activos - r.deben.length - r.sinCuota;
@@ -870,7 +882,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var nav = '<div class="fila"><p class="sub">' + esc(nombreMes(mes)) + '</p><div class="dianav"><button data-a="mesPanel" data-n="-1" aria-label="Mes anterior">‹</button><button data-a="mesPanel" data-n="1" aria-label="Mes siguiente">›</button></div></div>';
     var vuelta = S.volverAsist === 'lista' ? ['lista', '‹ Pasar lista'] : ['panel', '‹ Panel'];
     var h = '<header><button class="volver" data-a="ir" data-v="' + vuelta[0] + '">' + vuelta[1] + '</button>' + nav + '<h1>' + esc(g.nombre) + (g.activo === false ? ' <span class="muted chico">(cerrado)</span>' : '') + '</h1>' + sync() + '</header><main>';
-    if (mes !== mesCargado) return h + '<p class="vacio">' + (S.cargando ? 'Cargando…' : (S.sinSenal ? 'Sin señal: para ver otro mes hace falta conexión.' : 'No se pudo cargar este mes.')) + '</p></main>';
+    if (!hayMes(mes)) return h + '<p class="vacio">' + (S.cargando ? 'Cargando…' : (S.sinSenal ? 'Sin señal: para ver otro mes hace falta conexión.' : 'No se pudo cargar este mes.')) + '</p></main>';
     var del = D.asistencias.filter(function (x) { return x.grupo === g.id && mesDe(x.fecha) === mes; });
     var fechas = []; del.forEach(function (x) { if (fechas.indexOf(x.fecha) < 0) fechas.push(x.fecha); }); fechas.sort();
     var por = {}; del.forEach(function (x) { (por[x.alumno] = por[x.alumno] || []).push(x.fecha); });
@@ -1000,7 +1012,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var sede = R.grupos[0].sede, nm = MESES[Number(mes.slice(5)) - 1], para = R.parte.para || 'el lugar', pc = txtPct(R.parte.porcentaje);
     var nav = '<div class="fila"><p class="sub">' + esc(nombreMes(mes)) + '</p><div class="dianav"><button data-a="mesPanel" data-n="-1" aria-label="Mes anterior">‹</button><button data-a="mesPanel" data-n="1" aria-label="Mes siguiente">›</button></div></div>';
     var h = '<header><button class="volver" data-a="ir" data-v="panel">‹ Panel</button>' + nav + '<h1 id="parte-t">' + esc(sede) + '</h1>' + sync() + '</header><main>';
-    if (mes !== mesCargado) return h + '<p class="vacio">' + (S.cargando ? 'Cargando…' : (S.sinSenal ? 'Sin señal: para ver otro mes hace falta conexión.' : 'No se pudo cargar este mes.')) + '</p></main>';
+    if (!hayMes(mes)) return h + '<p class="vacio">' + (S.cargando ? 'Cargando…' : (S.sinSenal ? 'Sin señal: para ver otro mes hace falta conexión.' : 'No se pudo cargar este mes.')) + '</p></main>';
     var nombres = R.grupos.filter(function (g) { return g.activo !== false || R.filas.some(function (f) { return valoresEn(f.a, mes).grupo === g.id; }); }).sort(porHora).map(function (g) { return g.nombre; });
     var txt = sede + ' · ' + nombreMes(mes) + '\n\n' + R.filas.map(function (f) { return f.a.nombre + ': ' + plata(f.monto); }).join('\n') +
       (R.filas.length ? '\n\n' : '') + 'Total: ' + plata(R.total) + '\n' + pc + ' para ' + para + ': ' + plata(R.monto);
@@ -1394,6 +1406,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     },
     toggle: function (d) {
       var f = S.fecha, g = S.grupo, aid = d.id, gr = grupo(g);
+      if (!hayMes(mesDe(f))) return; // sin las asistencias de ese mes no se sabe si pone o quita
       var on = !D.asistencias.some(function (x) { return x.fecha === f && x.grupo === g && x.alumno === aid; });
       if (!gr || !sePuedeTildar(gr, f, on)) return; // la clase todavía no llegó, o ese día el grupo no tiene clase
       var datos = { fecha: f, grupo: g, alumno: aid, on: on };
@@ -1404,7 +1417,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     recupCerrar: function () { S.recupAbierto = false; S.buscar = ''; render(); },
     recuperar: function (d) {
       var gr = grupo(S.grupo);
-      if (!gr || !sePuedeTildar(gr, S.fecha, true)) return;
+      if (!gr || !sePuedeTildar(gr, S.fecha, true) || !hayMes(mesDe(S.fecha))) return;
       var f = S.fecha, g = S.grupo, clave = f + '|' + g;
       if (!S.recup || S.recup.clave !== clave) S.recup = { clave: clave, ids: [] };
       if (S.recup.ids.indexOf(d.id) < 0) S.recup.ids.push(d.id);
@@ -1457,7 +1470,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       var mes = mesDe(hoy());
       // Lo que está en la cola se manda recién con la conexión nueva ya guardada (no se pierde).
       llamar('todo', { mes: mes }, c).then(function (d) {
-        cfg = c; guardarCfg(c); D = d; mesCargado = mes; S.ultima = new Date(); S.fecha = hoy(); S.vista = 'hoy';
+        cfg = c; guardarCfg(c); D = d; mesCargado = mes; mesesListos = [mes]; S.ultima = new Date(); S.fecha = hoy(); S.vista = 'hoy';
         S.claveMal = false; S.conn = null; guardarBorrConn(null); S.sinSenal = false; S.errorCola = null;
         aplicarCola(); guardarCache(); cargar();
       }).catch(function (e) { S.error = sinSenalReal(e) ? 'Sin señal: para conectar hace falta conexión.' : e.message; }).then(function () { S.cargando = false; render(); });
@@ -1507,7 +1520,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Arranque: si hay datos guardados se muestran ya (sirve sin señal) y se actualizan detrás.
   if (cfg) {
     var cache = leerLS(CACHE_LS, null);
-    if (cache && cache.D) { D = cache.D; D.historial = D.historial || []; mesCargado = cache.mes; S.ultima = new Date(cache.t); aplicarCola(); }
+    if (cache && cache.D) { D = cache.D; D.historial = D.historial || []; mesCargado = cache.mes; mesesListos = cache.meses || (cache.mes ? [cache.mes] : []); S.ultima = new Date(cache.t); aplicarCola(); }
   }
   render();
   if (cfg) cargar(mesDe(hoy()));
