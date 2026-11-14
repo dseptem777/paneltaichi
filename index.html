@@ -355,7 +355,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function porHora(a, b) { return a.sede.localeCompare(b.sede, 'es') || horaNum(a.hora) - horaNum(b.hora); }
   function alumno(aid) { return D.alumnos.find(function (a) { return a.id === aid; }); }
   function porNombre(a, b) { return a.nombre.localeCompare(b.nombre, 'es'); }
-  function alumnosDe(gid) { return D.alumnos.filter(function (a) { return a.activo && a.grupo === gid; }).sort(porNombre); }
+  // Alumnos del grupo en el mes de la clase (Historial): una clase de septiembre muestra a los de
+  // septiembre, aunque después se hayan ido o cambiado de grupo (14/11, meses importados de la planilla vieja).
+  function alumnosDe(gid, mes) {
+    return D.alumnos.filter(function (a) { var v = valoresEn(a, mes); return v.activo && v.grupo === gid; }).sort(porNombre);
+  }
   function gruposDelDia(f) {
     var letra = DIAS[deIso(f).getDay()];
     return abiertos().filter(function (g) { return g.dias.split(',').map(function (x) { return x.trim().toUpperCase(); }).indexOf(letra) >= 0; })
@@ -366,7 +370,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Los que vinieron a esta clase desde otro grupo (recuperan): tienen presente acá pero no son del grupo.
   // También los que Héctor acaba de sumar y destildó (S.recup), para que no desaparezcan de la lista.
   function recuperanEn(f, gid) {
-    var del = {}; alumnosDe(gid).forEach(function (a) { del[a.id] = true; });
+    var del = {}; alumnosDe(gid, mesDe(f)).forEach(function (a) { del[a.id] = true; });
     var ids = [];
     D.asistencias.forEach(function (x) { if (x.fecha === f && x.grupo === gid && !del[x.alumno] && ids.indexOf(x.alumno) < 0) ids.push(x.alumno); });
     if (S.recup && S.recup.clave === f + '|' + gid) S.recup.ids.forEach(function (i) { if (!del[i] && ids.indexOf(i) < 0) ids.push(i); });
@@ -517,7 +521,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   // Pantalla de inicio: los grupos, sin plata (pedido de Héctor). Arriba las clases del día elegido.
   function tarjetaGrupo(g, f, deHoy) {
-    var al = alumnosDe(g.id), pr = presentesSet(f, g.id), n = Object.keys(pr).length;
+    var al = alumnosDe(g.id, mesDe(f)), pr = presentesSet(f, g.id), n = Object.keys(pr).length;
     return '<div class="clase" style="cursor:default;padding:0;overflow:hidden;align-items:stretch;gap:0">' +
       '<button data-a="lista" data-g="' + esc(g.id) + '" aria-label="Ver grupo ' + esc(g.nombre) + '" style="display:flex;align-items:center;flex-grow:1;min-width:0;background:none;border:0;padding:12px 8px 12px 16px;text-align:left;cursor:pointer">' +
       '<span class="txt"><b style="font-size:20px;font-weight:700">' + esc(g.hora) + ' · ' + esc(g.sede) + '</b>' +
@@ -589,7 +593,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
 
   function vLista() {
     var g = grupo(S.grupo); if (!g) { S.vista = 'hoy'; return vHoy(); }
-    var f = S.fecha, mes = mesDe(f), al = alumnosDe(g.id), pr = presentesSet(f, g.id), rec = recuperanEn(f, g.id);
+    var f = S.fecha, mes = mesDe(f), al = alumnosDe(g.id, mes), pr = presentesSet(f, g.id), rec = recuperanEn(f, g.id);
     var n = Object.keys(pr).length, nr = rec.filter(function (a) { return pr[a.id]; }).length;
     var px = otraClase(g, f, 1), sinProx = !px || px > hoy(), futuro = f > hoy();
     // Día sin clase de este grupo (pasa si se abre desde "los demás grupos"): no se tilda, así no quedan
