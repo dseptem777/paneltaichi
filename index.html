@@ -392,6 +392,9 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function invitado(aid, gid) { return D.pagos.some(function (p) { return p.alumno === aid && p.grupo === gid && !p.monto; }); }
   function precioTaller(a, g) {
     if (invitado(a.id, g.id)) return 0;
+    // Precio especial puesto al cobrar (vale el último).
+    var esp = D.pagos.filter(function (p) { return p.alumno === a.id && p.grupo === g.id && p.precio != null; }).pop();
+    if (esp) return esp.precio;
     var v = valoresEn(a, mesTaller(g)); return v.grupo === g.id && v.cuota != null ? v.cuota : (g.precio || 0);
   }
   function estadoTaller(a, g) {
@@ -785,6 +788,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<div class="card" style="flex-direction:row;align-items:center;gap:12px"><span style="width:44px;height:44px;border-radius:22px;background:var(--pastel-suave);display:flex;align-items:center;justify-content:center;font-weight:700">' + esc(iniciales(a.nombre)) + '</span>' +
       '<span style="display:flex;flex-direction:column;gap:2px"><b style="font-size:18px;font-weight:600">' + esc(a.nombre) + '</b><span class="muted chico">Taller ' + esc(t.sede) + ' · ' + esc(fechasTxt(t)) + ' · ' + plata(precio) + '</span></span></div>' +
       (!P.editando && precio && ya >= precio ? '<p class="franja">Ya pagó el taller completo (' + plata(ya) + '). ¿Seguro?</p>' : (ya ? '<p class="sub">Ya pagó ' + plata(ya) + ' del taller.</p>' : '')) +
+      (P.editando ? '' : '<div class="campo"><label for="p-precio">Precio del taller para ' + esc(a.nombre.split(' ')[0]) + '</label><input id="p-precio" class="monto" type="text" inputmode="numeric" data-campo="precioPago" value="' + esc(plata(P.precioPago != null ? P.precioPago : precio)) + '"><span class="muted chico">Cambialo si a esta persona le cobrás otro precio.</span></div>') +
       '<div class="campo"><label for="p-monto">Monto que pagó</label><input id="p-monto" class="monto" type="text" inputmode="numeric" data-campo="monto" value="' + esc(P.monto ? plata(P.monto) : '') + '"></div>' +
       '<div class="campo"><span style="font-size:15px;font-weight:600">Cómo pagó</span><div class="medios">' +
       '<button class="opcion" data-a="medio" data-m="efectivo" aria-pressed="' + (P.medio === 'efectivo') + '">Efectivo</button>' +
@@ -1521,7 +1525,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(P.fecha)) { P.error = 'Revisá la fecha.'; return render(); }
       P.guardando = true; P.error = null; render();
       var envio = { id: P.id, alumno: P.alumno, monto: P.monto, medio: P.medio, mes: P.mes, fecha: P.fecha };
-      if (P.taller && !P.editando) envio.grupo = P.taller; // pago del taller: no cuenta para la cuota
+      if (P.taller && !P.editando) {
+        envio.grupo = P.taller; // pago del taller: no cuenta para la cuota
+        if (P.precioPago != null && P.precioPago !== precioTaller(alumno(P.alumno), grupo(P.taller))) envio.precio = P.precioPago;
+      }
       if (P.editando) {
         // Si ese pago todavía tiene algo en la cola, la corrección va por la cola:
         // si lo último pendiente no salió todavía, se corrige ahí; si ya está saliendo, va detrás.
@@ -1693,6 +1700,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       // Cuota vacía = null (en un taller: paga el precio del taller). "0" escrito es 0.
       dest[c] = c === 'cuota' && !/\d/.test(v) ? null : soloNumero(v);
       e.target.value = dest[c] ? plata(dest[c]) : (dest[c] === 0 && /\d/.test(v) ? plata(0) : '');
+    } else if (c === 'precioPago') {
+      // Precio especial al cobrar un taller: el monto pasa a ser ese precio menos lo que ya pagó.
+      var P = S.pago; P.precioPago = /\d/.test(v) ? soloNumero(v) : null;
+      e.target.value = P.precioPago != null ? plata(P.precioPago) : '';
+      if (P.precioPago != null) { P.monto = Math.max(0, P.precioPago - pagadoTaller(P.alumno, P.taller)); document.getElementById('p-monto').value = P.monto ? plata(P.monto) : ''; }
     } else dest[c] = v;
     if (S.vista === 'grupoEdit') {
       if (c === 'pct' || c === 'para') dest.parteTocada = true;
@@ -1700,7 +1712,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     }
   });
   document.addEventListener('change', function (e) {
-    var c = e.target.dataset && e.target.dataset.campo; if (!c || c === 'buscar' || c === 'monto' || c === 'cuota' || c === 'precio') return;
+    var c = e.target.dataset && e.target.dataset.campo; if (!c || c === 'buscar' || c === 'monto' || c === 'cuota' || c === 'precio' || c === 'precioPago') return;
     var dest = destino(); if (dest) dest[c] = e.target.value;
   });
 
