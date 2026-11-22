@@ -382,6 +382,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function terminado(g) { var fs = fechasDe(g); return fs.length > 0 && fs[fs.length - 1] < hoy(); }
   // Un taller que ya pasó se sigue viendo en Grupos y en los filtros hasta fin del mes siguiente; después, en el Panel de su mes.
   function tallerALaVista(g) { return !terminado(g) || mesDe(fechasDe(g)[fechasDe(g).length - 1]) >= sumarMes(mesDe(hoy()), -1); }
+  // En qué fecha se abre un taller: la que se está viendo si es del taller; si no, la próxima (o hoy); si ya pasó, la última.
+  function fechaDeTaller(g, f) {
+    var fs = fechasDe(g); if (fs.indexOf(f) >= 0) return f;
+    return fs.filter(function (x) { return x >= hoy(); })[0] || fs[fs.length - 1];
+  }
   function fechasTxt(g) { return fechasDe(g).map(function (f) { return NOMBRE_DIA[deIso(f).getDay()].slice(0, 3).toLowerCase() + ' ' + fechaCorta(f); }).join(', '); }
   // A qué grupo va un pago: el taller si lo dice; si no, el grupo del alumno en el mes del pago
   // (así los pagos de la gente de un taller cargados como cuota, antes del 22/11, cuentan para el taller).
@@ -693,7 +698,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       (futuro ? '' : '<button class="btn sec" style="min-height:48px;font-size:16px;padding:0 8px" data-a="verPresentes" data-g="' + esc(g.id) + '" data-f="' + f + '">' + (f === hoy() ? 'Presentes hoy' : 'Presentes del ' + esc(fechaCorta(f))) + ' (' + n + ')</button>') +
       // Arriba de la lista (pedido de Héctor): con grupos largos no hay que bajar hasta el final.
       '<div class="dos"><button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="verAsist" data-g="' + esc(g.id) + '" data-mes="' + mes + '">Ver asistencias</button>' +
-      '<button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="grupoEditar" data-g="' + esc(g.id) + '">Editar grupo</button></div><ul class="lista">';
+      '<button class="btn sec" style="min-height:44px;font-size:15px;padding:0 8px" data-a="grupoEditar" data-g="' + esc(g.id) + '">' + (tal ? 'Editar taller' : 'Editar grupo') + '</button></div><ul class="lista">';
     if (!al.length) h += '<li class="vacio">' + (tal ? 'Todavía no hay nadie anotado.' : 'Este grupo no tiene alumnos.') + '</li>';
     al.forEach(function (a) {
       var on = !!pr[a.id], e = tal ? estadoTaller(a, g) : estadoPago(a, mes);
@@ -1092,7 +1097,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         '<div class="campo"><label for="g-para">¿A quién se le paga?</label><input id="g-para" type="text" data-campo="para" value="' + esc(G.para) + '" placeholder="Ej. UVLS"></div></div>' : '') +
       (G.error ? '<p class="err">' + esc(G.error) + '</p>' : '') +
       '<button class="btn" data-a="grupoGuardar"' + (G.guardando ? ' disabled' : '') + '>' + (G.guardando ? 'Guardando…' : (nuevo ? 'Crear clase' : (G.activo === false ? 'Guardar y volver a abrir' : 'Guardar cambios'))) + '</button>' +
-      (!nuevo && G.activo !== false ? '<button class="btn sec" style="border-color:var(--debe);color:var(--debe)" data-a="ir" data-v="grupoCerrar">Cerrar este grupo</button>' : '') +
+      (!nuevo && G.activo !== false ? '<button class="btn sec" style="border-color:var(--debe);color:var(--debe)" data-a="ir" data-v="grupoCerrar">' + (G.tipo === 'fechas' ? 'Cerrar este taller' : 'Cerrar este grupo') + '</button>' : '') +
       (!nuevo && G.activo !== false ? '<p class="muted chico" style="margin:0">Cambiar el horario no cambia los presentes ni los pagos que ya están anotados.</p>' : '') + '</main>';
     return h;
   }
@@ -1177,7 +1182,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 14;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 15;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
@@ -1225,7 +1230,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       demo: '<div class="fila"><span class="muted">30% para UVLS</span><b class="mal" style="font-size:20px">$99.000</b></div><div class="btn sec" style="font-size:16px">Ver el detalle para mandar</div>' },
     { v: 13, t: 'Cuánto te transfirieron', p: 'En Cobros, tocá "Transferencias de" y el mes: ves quién te transfirió, qué día y cuánto, y el total. Cuenta lo que te transfirieron en ese mes, sea el 5 o el 30, aunque sea la cuota de otro mes (en ese caso lo dice abajo del nombre). Con las flechas ‹ › cambiás de mes.',
       demo: '<div class="btn sec" style="font-size:16px">Transferencias de noviembre</div><div class="fila"><span>Gustavo<br><span class="muted chico">3/11</span></span><b>$55.000</b></div>' },
-    { v: 14, t: 'Talleres', p: 'Para un taller o una clase suelta, tocá "+ Nueva clase" (o el lápiz del grupo) y elegí "Fechas sueltas (taller)": agregás la fecha (o varias) y el precio por persona. Sale en "Clases de hoy" solo esos días. Adentro, "+ Anotar a alguien" anota a la gente con el nombre y el teléfono, y paga el precio del taller. Si viene un alumno tuyo, tocá "+ Viene alguien de otro grupo". "Cobrar taller" no toca la cuota del mes; si lo invitás, tocá "Invitado". Si a alguien le cobrás otra cosa, cambialo en su ficha (Editar datos → Precio especial).',
+    { v: 15, t: 'Talleres', p: 'Para un taller o una clase suelta, tocá "+ Nueva clase" (o el lápiz del grupo) y elegí "Fechas sueltas (taller)": agregás la fecha (o varias) y el precio por persona. Sale en "Clases de hoy" solo esos días. Adentro, "+ Anotar a alguien" anota a la gente con el nombre y el teléfono, y paga el precio del taller. Si viene un alumno tuyo, tocá "+ Viene alguien de otro grupo". "Cobrar taller" no toca la cuota del mes; si lo invitás, tocá "Invitado". Si a alguien le cobrás otro precio, al cobrar cambiá "Precio del taller para…" (si es del taller, también podés ponerlo en su ficha: Editar datos → Precio especial). Para cambiar la fecha o el precio de todos, tocá "Editar taller".',
       demo: '<div class="btn sec" style="font-size:16px">+ Anotar a alguien</div><div class="alumno" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 14px"><span class="nom" style="padding:0;min-height:0"><b>Laly</b><span class="estado mal">Debe el taller · $15.000</span></span><span class="chip debe">Cobrar taller</span></div>' },
     { v: 6, t: 'Cambios a mitad de mes', p: 'Cuando le cambiás la cuota o el grupo a alguien, o lo das de baja, la app te pregunta desde qué mes vale. Si ya te pagó este mes con la cuota de antes, o si te debe este mes y se va, elegí el mes que viene.',
       demo: '<div class="opcion" style="text-align:left;padding:10px 14px">Desde este mes</div><div class="opcion" style="text-align:left;padding:10px 14px">Desde el mes que viene</div>' },
@@ -1422,10 +1427,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         }
         var i = D.grupos.findIndex(function (x) { return x.id === g.id; });
         if (i >= 0) D.grupos[i] = g; else D.grupos.push(g);
-        toast(G.id ? (G.activo === false ? 'Grupo abierto de nuevo' : 'Grupo guardado') : (esTaller(g) ? 'Taller creado: ' + g.sede + ' ' + fechasTxt(g) : 'Clase creada: ' + g.nombre));
+        toast(G.id ? (G.activo === false ? 'Grupo abierto de nuevo' : (esTaller(g) ? 'Taller guardado' : 'Grupo guardado')) : (esTaller(g) ? 'Taller creado: ' + g.sede + ' ' + fechasTxt(g) : 'Clase creada: ' + g.nombre));
         // Al grupo editado (abierto); una clase nueva o reabierta vuelve a la lista de grupos.
         var alGrupo = G.id && G.activo !== false;
-        S.gedit = null; if (alGrupo) S.grupo = g.id; ir(alGrupo ? 'lista' : 'hoy'); cargar();
+        S.gedit = null; if (alGrupo) { S.grupo = g.id; if (esTaller(g)) S.fecha = fechaDeTaller(g, S.fecha); } ir(alGrupo ? 'lista' : 'hoy'); cargar();
       }).catch(function (e) { G.guardando = false; G.error = (e.red ? 'Sin señal: esto necesita conexión.' : 'No se guardó (' + e.message + ').'); render(); });
     },
     cerrarDestino: function (d) { S.gedit.destino = d.g; render(); },
@@ -1476,10 +1481,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       S.grupo = d.g;
       // Un taller abre en su fecha: la próxima (o hoy) si falta, si no la última.
       var g = grupo(d.g);
-      if (esTaller(g) && !tieneClase(g, S.fecha)) {
-        var fs = fechasDe(g), prox = fs.filter(function (x) { return x >= hoy(); })[0];
-        S.fecha = prox || fs[fs.length - 1];
-      }
+      if (esTaller(g)) S.fecha = fechaDeTaller(g, S.fecha);
       if (!S.anotar || S.anotar.g !== d.g) S.anotar = null;
       ir('lista');
     },
