@@ -1067,6 +1067,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   var NOMBRE_LETRA = { L: 'Lunes', M: 'Martes', X: 'Miércoles', J: 'Jueves', V: 'Viernes', S: 'Sábado', D: 'Domingo' };
   function diasLargos(d) { return d.split(',').filter(Boolean).map(function (x) { return NOMBRE_LETRA[x.trim()] || x; }).join(', '); }
   function cuantos(gid) { return D.alumnos.filter(function (a) { return a.activo && a.grupo === gid; }).length; }
+  // Sin alumnos (ni de baja) ni pagos. Los presentes de otros meses los revisa la planilla.
+  function sePuedeBorrar(gid) {
+    var es = function (x) { return x.grupo === gid; };
+    return !D.alumnos.some(es) && !D.pagos.some(es) && !D.asistencias.some(es);
+  }
 
   function vGrupoEdit() {
     var G = S.gedit, nuevo = !G.id, sedes = [];
@@ -1099,7 +1104,14 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       (G.error ? '<p class="err">' + esc(G.error) + '</p>' : '') +
       '<button class="btn" data-a="grupoGuardar"' + (G.guardando ? ' disabled' : '') + '>' + (G.guardando ? 'Guardando…' : (nuevo ? 'Crear clase' : (G.activo === false ? 'Guardar y volver a abrir' : 'Guardar cambios'))) + '</button>' +
       (!nuevo && G.activo !== false ? '<button class="btn sec" style="border-color:var(--debe);color:var(--debe)" data-a="ir" data-v="grupoCerrar">' + (G.tipo === 'fechas' ? 'Cerrar este taller' : 'Cerrar este grupo') + '</button>' : '') +
-      (!nuevo && G.activo !== false ? '<p class="muted chico" style="margin:0">Cambiar el horario no cambia los presentes ni los pagos que ya están anotados.</p>' : '') + '</main>';
+      (!nuevo && G.activo !== false ? '<p class="muted chico" style="margin:0">Cambiar el horario no cambia los presentes ni los pagos que ya están anotados.</p>' : '') +
+      // Borrar (22/11): para grupos armados por error. La planilla igual lo rechaza si tuvo presentes de otros meses.
+      (!nuevo && sePuedeBorrar(G.id) ? (G.borrar
+        ? '<div class="card" style="gap:10px"><b style="font-size:17px">¿Borrar ' + esc(G.sedeOriginal + ' ' + G.horaOriginal) + '?</b><span class="muted chico">Desaparece del todo. No se puede deshacer.</span>' +
+          '<div class="fila" style="gap:10px;flex-wrap:wrap"><button class="btn" style="flex:1 1 130px;background:var(--debe);border-color:var(--debe)" data-a="grupoBorrarSi"' + (G.guardando ? ' disabled' : '') + '>' + (G.guardando ? 'Borrando…' : 'Sí, borrar') + '</button>' +
+          '<button class="btn sec" style="flex:1 1 130px" data-a="grupoBorrarNo">No</button></div></div>'
+        : '<button class="btn sec" style="border-color:var(--debe);color:var(--debe)" data-a="grupoBorrar">' + (G.tipo === 'fechas' ? 'Borrar este taller' : 'Borrar este grupo') + '</button>' +
+          '<p class="muted chico" style="margin:0">Para una clase armada por error, que nunca tuvo alumnos.</p>') : '') + '</main>';
     return h;
   }
 
@@ -1448,6 +1460,18 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         toast('Grupo cerrado' + (r.alumnos ? (G.destino ? ': ' + r.alumnos + ' movidos' : ': ' + r.alumnos + ' dados de baja') : ''));
         S.gedit = null; ir('hoy'); cargar();
       }).catch(function (e) { G.guardando = false; G.error = (e.red ? 'Sin señal: esto necesita conexión.' : 'No se cerró (' + e.message + ').'); render(); });
+    },
+    grupoBorrar: function () { S.gedit.borrar = true; S.gedit.error = null; render(); },
+    grupoBorrarNo: function () { S.gedit.borrar = false; render(); },
+    grupoBorrarSi: function () {
+      var G = S.gedit;
+      G.guardando = true; G.error = null; render();
+      llamar('borrarGrupo', { id: G.id }).then(function () {
+        cambios++;
+        D.grupos = D.grupos.filter(function (g) { return g.id !== G.id; });
+        toast(G.tipo === 'fechas' ? 'Taller borrado' : 'Grupo borrado');
+        S.gedit = null; ir('hoy'); cargar();
+      }).catch(function (e) { G.guardando = false; G.borrar = false; G.error = (e.red ? 'Sin señal: esto necesita conexión.' : 'No se borró (' + e.message + ').'); render(); });
     },
     tutoSig: function () {
       var nov = S.tutoNovedad;
