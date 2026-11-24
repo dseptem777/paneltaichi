@@ -58,6 +58,7 @@ main { padding: 6px 20px 20px; display: flex; flex-direction: column; gap: 16px;
 .tilde[aria-pressed="true"] { background: var(--pastel); border-color: var(--pastel-borde); color: var(--verde-oscuro); }
 label { font-size: 15px; font-weight: 600; }
 .campo { display: flex; flex-direction: column; gap: 6px; }
+[hidden] { display: none !important; }
 input[type=text], input[type=date], input[type=time], input[type=search], input[type=tel], select, textarea { font-size: 17px; padding: 12px 14px; border: 1px solid var(--off-borde); border-radius: 12px; background: var(--card); min-height: 52px; width: 100%; }
 input.monto { font-size: 26px; font-weight: 700; border: 2px solid var(--pastel-borde); }
 textarea { min-height: 80px; resize: vertical; }
@@ -424,6 +425,14 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function horaNum(h) { var a = String(h).split(':').map(Number); return (a[0] || 0) * 60 + (a[1] || 0); }
   // Lo pagado de la cuota de un mes (sin los pagos de talleres).
   function pagado(aid, mes) { return D.pagos.filter(function (p) { return p.alumno === aid && p.mes === mes && !esPagoTaller(p); }).reduce(function (s, p) { return s + p.monto; }, 0); }
+  // Héctor le dio el mes por pagado aunque no llegó a la cuota (24/11). Un script viejo no manda el campo: no saldado.
+  // En el cobro: el monto no llega a la cuota del mes (contando lo que ya pagó), así que puede darse por saldado.
+  function pagoCorto(P) {
+    if (P.taller) return false;
+    var c = valoresEn(alumno(P.alumno), P.mes).cuota, ya = pagado(P.alumno, P.mes) - (P.editando && P.mesOriginal === P.mes ? P.montoOriginal : 0);
+    return c > 0 && ya + (P.monto || 0) < c;
+  }
+  function saldado(aid, mes) { return D.pagos.some(function (p) { return p.alumno === aid && p.mes === mes && p.saldado === true && !esPagoTaller(p); }); }
   // Los que vinieron a esta clase desde otro grupo (recuperan): tienen presente acá pero no son del grupo.
   // También los que Héctor acaba de sumar y destildó (S.recup), para que no desaparezcan de la lista.
   function recuperanEn(f, gid) {
@@ -463,6 +472,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var cuota = valoresEn(a, mes).cuota;
     if (!cuota) return { cls: 'muted', txt: 'Sin cuota cargada', debe: false };
     var p = pagado(a.id, mes);
+    if (p < cuota && saldado(a.id, mes)) return { cls: 'ok', txt: 'Pagó ' + MESES[Number(mes.slice(5)) - 1] + ' (arreglo)', debe: false };
     if (p >= cuota) return { cls: 'ok', txt: 'Pagó ' + MESES[Number(mes.slice(5)) - 1], debe: false };
     if (p > 0) return { cls: 'mal', txt: 'Pagó ' + plata(p) + ' de ' + plata(cuota), debe: true };
     return { cls: 'mal', txt: 'Debe ' + MESES[Number(mes.slice(5)) - 1] + ' · ' + plata(cuota), debe: true };
@@ -480,9 +490,10 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       activos++;
       if (gr) gr.alumnos++;
       if (v.cuota > 0) {
-        esperado += v.cuota;
-        if (gr) gr.esperado += v.cuota;
-        if (p < v.cuota) deben.push({ a: a, falta: v.cuota - p });
+        var c = p < v.cuota && saldado(a.id, mes) ? p : v.cuota; // saldado: se esperaba lo que pagó
+        esperado += c;
+        if (gr) gr.esperado += c;
+        if (p < c) deben.push({ a: a, falta: c - p });
       } else sinCuota++;
     });
     // Talleres de este mes: lo de cada uno va a su tarjeta, al total y a los que deben (marcados con el taller).
@@ -781,6 +792,9 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       '<div class="campo"><span style="font-size:15px;font-weight:600">Mes que paga</span><div class="tres">' + meses.map(function (m) {
         return '<button class="opcion" style="font-size:15px" data-a="mesPago" data-m="' + m + '" aria-pressed="' + (P.mes === m) + '">' + MESES[Number(m.slice(5)) - 1].slice(0, 3) + '</button>';
       }).join('') + '</div></div>' +
+      // Paga menos que la cuota y Héctor se lo acepta como el mes completo.
+      ('<div class="campo" id="p-saldado"' + (pagoCorto(P) ? '' : ' hidden') + '><button class="opcion" style="text-align:left;padding:10px 14px;line-height:1.3" data-a="saldado" aria-pressed="' + !!P.saldado + '">' +
+        (P.saldado ? '✓ ' : '') + 'Con esto queda pagado ' + esc(MESES[Number(P.mes.slice(5)) - 1]) + '</button><span class="muted chico">Tocalo si le aceptás este monto por el mes entero: no va a figurar como que debe.</span></div>') +
       '<div class="campo"><label for="p-fecha">Fecha</label><input id="p-fecha" type="date" data-campo="fecha" value="' + esc(P.fecha) + '"></div>' +
       (P.error ? '<p class="err">' + esc(P.error) + '</p>' : '') +
       '<button class="btn" data-a="guardarPago"' + (P.guardando ? ' disabled' : '') + '>' + (P.guardando ? 'Guardando…' : (P.editando ? 'Guardar cambios' : 'Guardar pago')) + '</button></main>';
@@ -889,7 +903,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     if (!pagos.length) h += '<p class="muted chico" style="margin:0">No hay pagos registrados.</p>';
     pagos.forEach(function (p, k) {
       h += (k ? '<div style="height:1px;background:var(--line)"></div>' : '') +
-        '<div class="fila" style="min-height:44px"><span>' + esc(esPagoTaller(p) ? 'Taller ' + grupo(grupoDelPago(p)).sede + (p.monto ? '' : ' · invitado') : nombreMes(p.mes)) + '<br><span class="muted chico">' + esc(fechaCorta(p.fecha)) + ' · ' + esc(p.medio) + '</span></span><b class="ok">' + plata(p.monto) + '</b></div>' +
+        '<div class="fila" style="min-height:44px"><span>' + esc(esPagoTaller(p) ? 'Taller ' + grupo(grupoDelPago(p)).sede + (p.monto ? '' : ' · invitado') : nombreMes(p.mes)) + '<br><span class="muted chico">' + esc(fechaCorta(p.fecha)) + ' · ' + esc(p.medio) + (p.saldado ? ' · saldó el mes' : '') + '</span></span><b class="ok">' + plata(p.monto) + '</b></div>' +
         // Al tocar Borrar, donde estaba el botón aparece la pregunta (un doble toque no hace nada) y los botones bajan un renglón.
         (S.borrarId === p.id
           ? '<div style="display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px"><span class="mal" style="font-weight:700;flex-basis:100%;min-height:44px;display:flex;align-items:center">¿Borrar este pago?</span>' +
@@ -1195,7 +1209,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   // Se muestra solo la primera vez que hay datos; después se abre con "Ayuda" (Grupos) o "Ver el tutorial" (Panel).
   // Se guarda la versión del tutorial que ya se vio. Si sale un paso nuevo (v mayor), al abrir la app
   // se muestra solo ese paso como novedad, sin repetir todo.
-  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 15;
+  var TUTO_LS = 'taichi_tutorial_visto', TUTO_VER = 16;
   function tutoVersion() { try { var v = localStorage.getItem(TUTO_LS); return v == null ? 0 : (Number(v) || 0); } catch (e) { return TUTO_VER; } }
   function marcarTutoVisto() { try { localStorage.setItem(TUTO_LS, String(TUTO_VER)); } catch (e) {} }
   var LAPIZ = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
@@ -1249,6 +1263,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       demo: '<div class="btn sec" style="font-size:16px">+ Anotar a alguien</div><div class="alumno" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 14px"><span class="nom" style="padding:0;min-height:0"><b>Laly</b><span class="estado mal">Debe el taller · $15.000</span></span><span class="chip debe">Cobrar taller</span></div>' },
     { v: 15, t: 'Invitados y precios especiales', p: 'Alumno de otro grupo: tocá "Invitado", o al cobrar cambiá "Precio del taller para…". Anotado en el taller: en su ficha, "Precio especial" (0 = gratis).',
       demo: '<div class="alumno" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 14px"><span class="nom" style="padding:0;min-height:0"><b>Rosa</b><span class="estado mal">Debe el taller · $15.000</span></span><span style="display:flex;gap:8px"><span class="chip debe">Cobrar taller</span><span class="chip">Invitado</span></span></div>' },
+    { v: 16, t: 'Si alguien paga menos y se lo aceptás', p: 'Al registrar el pago, si el monto no llega a la cuota aparece "Con esto queda pagado…". Tocalo y ese mes no figura como que debe. En su ficha el pago dice "saldó el mes".',
+      demo: '<div class="opcion" style="text-align:left;padding:10px 14px" aria-pressed="true">✓ Con esto queda pagado noviembre</div>' },
     { v: 6, t: 'Cambios a mitad de mes', p: 'Cuando le cambiás la cuota o el grupo a alguien, o lo das de baja, la app te pregunta desde qué mes vale. Si ya te pagó este mes con la cuota de antes, o si te debe este mes y se va, elegí el mes que viene.',
       demo: '<div class="opcion" style="text-align:left;padding:10px 14px">Desde este mes</div><div class="opcion" style="text-align:left;padding:10px 14px">Desde el mes que viene</div>' },
     { v: 10, t: 'Grupos que hoy no tienen clase', p: 'Si entrás a un grupo que hoy no tiene clase (de los de abajo en Grupos), ves su lista pero no podés marcar presentes: arriba aparece un aviso en naranja. Así no quedan presentes en un día sin clase. Si querías otro grupo, volvé con "‹ Grupos". Para ver su última clase, tocá "‹ Anterior".',
@@ -1328,7 +1344,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   function nuevoPago(aid, mes) {
     var a = alumno(aid); mes = mes || mesDe(hoy());
     var tg = grupo(a.grupo); if (esTaller(tg)) return nuevoPagoTaller(aid, tg); // "Registrar pago" de alguien del taller
-    function falta(m) { var c = valoresEn(a, m).cuota || a.cuota; return { cuota: c, falta: Math.max(0, c - pagado(aid, m)) }; }
+    function falta(m) { var c = valoresEn(a, m).cuota || a.cuota; return { cuota: c, falta: saldado(aid, m) ? 0 : Math.max(0, c - pagado(aid, m)) }; }
     var f = falta(mes), aviso = null;
     // Si ese mes ya está pago completo, no se sugiere cobrarlo de nuevo: se propone el mes siguiente.
     if (f.cuota > 0 && !f.falta) {
@@ -1550,12 +1566,14 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     cancelarPago: function () { var v = S.volverPago || 'cobro'; S.pago = null; S.vista = v; render(); },
     medio: function (d) { S.pago.medio = d.m; render(); },
     mesPago: function (d) { S.pago.mes = d.m; render(); },
+    saldado: function () { S.pago.saldado = !S.pago.saldado; render(); },
     guardarPago: function () {
       var P = S.pago;
       if (!P.monto) { P.error = 'Poné el monto.'; return render(); }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(P.fecha)) { P.error = 'Revisá la fecha.'; return render(); }
       P.guardando = true; P.error = null; render();
       var envio = { id: P.id, alumno: P.alumno, monto: P.monto, medio: P.medio, mes: P.mes, fecha: P.fecha };
+      if (!P.taller) envio.saldado = !!P.saldado && pagoCorto(P);
       if (P.taller && !P.editando) {
         envio.grupo = P.taller; // pago del taller: no cuenta para la cuota
         if (P.precioPago != null && P.precioPago !== precioTaller(alumno(P.alumno), grupo(P.taller))) envio.precio = P.precioPago;
@@ -1604,7 +1622,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     editarPago: function (d) {
       var p = D.pagos.find(function (x) { return x.id === d.id; }); if (!p) return;
       S.borrarId = null;
-      S.pago = { id: p.id, alumno: p.alumno, monto: p.monto, medio: p.medio || 'efectivo', mes: p.mes, fecha: p.fecha, taller: esPagoTaller(p) ? grupoDelPago(p) : null,
+      S.pago = { id: p.id, alumno: p.alumno, monto: p.monto, medio: p.medio || 'efectivo', mes: p.mes, fecha: p.fecha, taller: esPagoTaller(p) ? grupoDelPago(p) : null, saldado: p.saldado === true,
         editando: true, montoOriginal: p.monto, mesOriginal: p.mes, error: null, guardando: false };
       S.volverPago = S.vista; S.vista = 'cobro'; window.scrollTo(0, 0); render();
     },
@@ -1731,6 +1749,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       // Cuota vacía = null (en un taller: paga el precio del taller). "0" escrito es 0.
       dest[c] = c === 'cuota' && !/\d/.test(v) ? null : soloNumero(v);
       e.target.value = dest[c] ? plata(dest[c]) : (dest[c] === 0 && /\d/.test(v) ? plata(0) : '');
+      var cs = document.getElementById('p-saldado'); if (cs && c === 'monto') cs.hidden = !pagoCorto(dest);
     } else if (c === 'precioPago') {
       // Precio especial al cobrar un taller: el monto pasa a ser ese precio menos lo que ya pagó.
       var P = S.pago; P.precioPago = /\d/.test(v) ? soloNumero(v) : null;
