@@ -432,6 +432,15 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     var c = valoresEn(alumno(P.alumno), P.mes).cuota, ya = pagado(P.alumno, P.mes) - (P.editando && P.mesOriginal === P.mes ? P.montoOriginal : 0);
     return c > 0 && ya + (P.monto || 0) < c;
   }
+  // Al revés: con este monto se pasa de la cuota del mes (Alberto, 21/11: anotado dos veces). Texto del aviso, o ''.
+  function avisoDeMas(P) {
+    if (P.taller || !P.monto) return '';
+    var c = valoresEn(alumno(P.alumno), P.mes).cuota, ya = pagado(P.alumno, P.mes) - (P.editando && P.mesOriginal === P.mes ? P.montoOriginal : 0);
+    if (!(c > 0) || ya + P.monto <= c) return '';
+    // "Ya pagó X" ya está arriba (vCobro); acá va la cuenta.
+    return 'Con este pago serían ' + plata(ya + P.monto) + ' y la cuota es ' + plata(c) + '.' +
+      (ya && ya < c ? ' Le falta ' + plata(c - ya) + '.' : '');
+  }
   function saldado(aid, mes) { return D.pagos.some(function (p) { return p.alumno === aid && p.mes === mes && p.saldado === true && !esPagoTaller(p); }); }
   // Los que vinieron a esta clase desde otro grupo (recuperan): tienen presente acá pero no son del grupo.
   // También los que Héctor acaba de sumar y destildó (S.recup), para que no desaparezcan de la lista.
@@ -479,13 +488,15 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
   }
   function resumenMes(mes) {
     var esperado = 0, cobrado = 0, deben = [], grupos = {}, activos = 0, sinCuota = 0;
-    D.grupos.forEach(function (g) { grupos[g.id] = { g: g, esperado: 0, cobrado: 0, alumnos: 0 }; });
+    D.grupos.forEach(function (g) { grupos[g.id] = { g: g, esperado: 0, cobrado: 0, alumnos: 0, deMas: [] }; });
     D.alumnos.forEach(function (a) {
       var v = valoresEn(a, mes);
       var gr = grupos[v.grupo];
       var p = pagado(a.id, mes);
       cobrado += p;
       if (gr) gr.cobrado += p;
+      // Lo que pagó por encima de lo esperado, para que la tarjeta diga quién (pago doble, 25/11).
+      if (gr && p > 0 && !esTaller(gr.g) && (!v.activo || !(v.cuota > 0))) gr.deMas.push({ a: a, monto: p });
       if (!v.activo || (gr && esTaller(gr.g))) return; // la gente de un taller no tiene cuota por mes
       activos++;
       if (gr) gr.alumnos++;
@@ -494,6 +505,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         esperado += c;
         if (gr) gr.esperado += c;
         if (p < c) deben.push({ a: a, falta: c - p });
+        if (gr && p > c) gr.deMas.push({ a: a, monto: p - c });
       } else sinCuota++;
     });
     // Talleres de este mes: lo de cada uno va a su tarjeta, al total y a los que deben (marcados con el taller).
@@ -778,7 +790,7 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     if (meses.indexOf(P.mes) < 0) meses.push(P.mes);
     // Al editar, lo "ya pagado" no incluye este mismo pago.
     var ya = pagado(a.id, P.mes) - (P.editando && P.mesOriginal === P.mes ? P.montoOriginal : 0);
-    var cuotaMes = valoresEn(a, P.mes).cuota, completo = !P.editando && cuotaMes > 0 && ya >= cuotaMes;
+    var cuotaMes = valoresEn(a, P.mes).cuota, completo = !P.editando && cuotaMes > 0 && ya >= cuotaMes, deMas = avisoDeMas(P);
     var h = '<header><button class="volver" data-a="cancelarPago">‹ Volver</button><h1>' + (P.editando ? 'Editar pago' : 'Registrar pago') + '</h1></header><main>' +
       '<div class="card" style="flex-direction:row;align-items:center;gap:12px"><span style="width:44px;height:44px;border-radius:22px;background:var(--pastel-suave);display:flex;align-items:center;justify-content:center;font-weight:700">' + esc(iniciales(a.nombre)) + '</span>' +
       '<span style="display:flex;flex-direction:column;gap:2px"><b style="font-size:18px;font-weight:600">' + esc(a.nombre) + '</b><span class="muted chico">' + esc(g ? g.nombre : '') + ' · cuota ' + plata(a.cuota) + '</span></span></div>' +
@@ -797,7 +809,9 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
         (P.saldado ? '✓ ' : '') + 'Con esto queda pagado ' + esc(MESES[Number(P.mes.slice(5)) - 1]) + '</button><span class="muted chico">Tocalo si le aceptás este monto por el mes entero: no va a figurar como que debe.</span></div>') +
       '<div class="campo"><label for="p-fecha">Fecha</label><input id="p-fecha" type="date" data-campo="fecha" value="' + esc(P.fecha) + '"></div>' +
       (P.error ? '<p class="err">' + esc(P.error) + '</p>' : '') +
-      '<button class="btn" data-a="guardarPago"' + (P.guardando ? ' disabled' : '') + '>' + (P.guardando ? 'Guardando…' : (P.editando ? 'Guardar cambios' : 'Guardar pago')) + '</button></main>';
+      // Pegado al botón: es lo que se ve al tocar Guardar.
+      '<p class="franja" id="p-demas"' + (deMas ? '' : ' hidden') + '>' + esc(deMas) + '</p>' +
+      '<button class="btn" data-a="guardarPago"' + (P.guardando ? ' disabled' : '') + '>' + (P.guardando ? 'Guardando…' : P.confirmaDeMas && deMas ? 'Sí, anotar igual' : (P.editando ? 'Guardar cambios' : 'Guardar pago')) + '</button></main>';
     return h;
   }
 
@@ -989,6 +1003,8 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       h += '<div class="card"><div class="fila"><b style="font-size:17px;font-weight:600">' + esc(tal ? 'Taller ' + x.g.sede + ' · ' + fechasTxt(x.g) : x.g.nombre) + (x.g.activo === false ? ' <span class="muted chico">(cerrado)</span>' : '') + '</b><span class="muted chico">' + x.alumnos + (tal ? (x.alumnos === 1 ? ' persona' : ' personas') : (x.alumnos === 1 ? ' alumno' : ' alumnos')) + '</span></div>' +
         '<div class="pista" style="height:8px"><div style="width:' + pct(x.cobrado, x.esperado) + '%"></div></div>' +
         '<div class="fila chico"><span class="ok" style="font-weight:600">' + plata(x.cobrado) + ' cobrado</span><span class="muted">de ' + plata(x.esperado) + '</span></div>' +
+        (x.deMas && x.deMas.length ? '<p class="franja">Incluye ' + plata(x.deMas.reduce(function (s, y) { return s + y.monto; }, 0)) + ' de más. Tocá el nombre para ver sus pagos:</p><div class="puntos">' +
+          x.deMas.sort(function (p, q) { return porNombre(p.a, q.a); }).map(function (y) { return '<button data-a="ficha" data-id="' + esc(y.a.id) + '">' + esc(y.a.nombre) + '</button>'; }).join('') + '</div>' : '') +
         '<div class="muted chico">' + (nf ? nf + (nf === 1 ? ' clase' : ' clases') + ' · promedio ' + promedio(clases, nf) + ' por clase' : 'Sin clases con lista este mes') + '</div>' +
         '<button class="btn sec" style="min-height:48px;font-size:16px" data-a="verAsist" data-g="' + esc(x.g.id) + '">Ver asistencias</button></div>';
     });
@@ -1565,12 +1581,14 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
     cobrar: function (d) { var de = S.vista; nuevoPago(d.id, d.mes); S.volverPago = de; S.vista = 'cobro'; window.scrollTo(0, 0); render(); },
     cancelarPago: function () { var v = S.volverPago || 'cobro'; S.pago = null; S.vista = v; render(); },
     medio: function (d) { S.pago.medio = d.m; render(); },
-    mesPago: function (d) { S.pago.mes = d.m; render(); },
+    mesPago: function (d) { S.pago.mes = d.m; S.pago.confirmaDeMas = false; render(); },
     saldado: function () { S.pago.saldado = !S.pago.saldado; render(); },
     guardarPago: function () {
       var P = S.pago;
       if (!P.monto) { P.error = 'Poné el monto.'; return render(); }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(P.fecha)) { P.error = 'Revisá la fecha.'; return render(); }
+      // Se pasa de la cuota: el primer toque frena y el botón pasa a "Sí, anotar igual".
+      if (avisoDeMas(P) && !P.confirmaDeMas) { P.confirmaDeMas = true; P.error = null; return render(); }
       P.guardando = true; P.error = null; render();
       var envio = { id: P.id, alumno: P.alumno, monto: P.monto, medio: P.medio, mes: P.mes, fecha: P.fecha };
       if (!P.taller) envio.saldado = !!P.saldado && pagoCorto(P);
@@ -1750,6 +1768,11 @@ header .fila { flex-wrap: wrap; row-gap: 8px; }
       dest[c] = c === 'cuota' && !/\d/.test(v) ? null : soloNumero(v);
       e.target.value = dest[c] ? plata(dest[c]) : (dest[c] === 0 && /\d/.test(v) ? plata(0) : '');
       var cs = document.getElementById('p-saldado'); if (cs && c === 'monto') cs.hidden = !pagoCorto(dest);
+      var dm = document.getElementById('p-demas');
+      if (dm && c === 'monto') {
+        var t = avisoDeMas(dest); dm.textContent = t; dm.hidden = !t;
+        if (dest.confirmaDeMas) { dest.confirmaDeMas = false; var bg = document.querySelector('[data-a="guardarPago"]'); if (bg) bg.textContent = dest.editando ? 'Guardar cambios' : 'Guardar pago'; }
+      }
     } else if (c === 'precioPago') {
       // Precio especial al cobrar un taller: el monto pasa a ser ese precio menos lo que ya pagó.
       var P = S.pago; P.precioPago = /\d/.test(v) ? soloNumero(v) : null;
